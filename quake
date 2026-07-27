@@ -1,0 +1,2 @@
+#!/bin/sh
+cd /mnt/card && exec ./quake-fb-launcher
