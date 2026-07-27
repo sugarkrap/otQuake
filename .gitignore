@@ -1,0 +1,15 @@
+# Raw CVS/RCS vault — historical reference, not source of truth (see extract-src.py)
+/handheldquake/
+/Attic/
+/CVSROOT/
+/zlib/
+/fdlibm/
+/libfloat/
+
+# Id Software game data — not ours to redistribute
+/data/
+
+# Build output
+/obj/
+/quake-fb
+/quake-fb-launcher
