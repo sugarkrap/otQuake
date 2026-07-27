@@ -61,10 +61,11 @@ SRCS := \
 OBJS   := $(patsubst %.c,$(OBJDIR)/%.o,$(SRCS))
 TARGET    := quake-fb
 LAUNCHER  := quake-fb-launcher
+FBTEXT    := fbtext
 
 .PHONY: all clean extract strip check-toolchain
 
-all: $(SRCDIR)/vid_fb.c $(TARGET) $(LAUNCHER)
+all: $(SRCDIR)/vid_fb.c $(TARGET) $(LAUNCHER) $(FBTEXT)
 
 $(TARGET): $(OBJS)
 	$(CC) $(ARCHFLAGS) -o $@ $^ $(LDFLAGS)
@@ -74,22 +75,27 @@ $(LAUNCHER): $(SRCDIR)/quake-fb-launcher.c
 	$(CC) $(ARCHFLAGS) -std=gnu99 -O2 -static -o $@ $<
 	@echo "Built $@ ($(shell wc -c < $@) bytes, EABI)"
 
+$(FBTEXT): fbtext.c
+	$(CC) $(ARCHFLAGS) -std=gnu99 -O2 -static -o $@ $<
+	@echo "Built $@ ($(shell wc -c < $@) bytes, EABI)"
+
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
-strip: $(TARGET) $(LAUNCHER)
-	$(STRIP) $(TARGET) $(LAUNCHER)
+strip: $(TARGET) $(LAUNCHER) $(FBTEXT)
+	$(STRIP) $(TARGET) $(LAUNCHER) $(FBTEXT)
 	@echo "Stripped $(TARGET) ($(shell wc -c < $(TARGET)) bytes)"
 	@echo "Stripped $(LAUNCHER) ($(shell wc -c < $(LAUNCHER)) bytes)"
+	@echo "Stripped $(FBTEXT) ($(shell wc -c < $(FBTEXT)) bytes)"
 
 extract:
 	python3 extract-src.py
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(LAUNCHER)
+	rm -rf $(OBJDIR) $(TARGET) $(LAUNCHER) $(FBTEXT)
 
 check-toolchain:
 	@if [ -x "$(CC)" ]; then \
