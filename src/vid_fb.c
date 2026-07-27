@@ -23,6 +23,7 @@
 #include <sys/mman.h>
 #include <linux/fb.h>
 #include <linux/input.h>
+#include <linux/kd.h>
 
 #include "quakedef.h"  /* pulls in keys.h, vid.h, etc. */
 
@@ -37,6 +38,36 @@ static int fb_width  = 640;
 static int fb_height = 480;
 static int fb_bpp    = 16;
 static int fb_use_vsync = 0;
+
+/* VT ownership: tell fbcon to get out of the way while we own the screen. */
+static int tty_fd = -1;
+static int tty_in_graphics_mode = 0;
+
+/*
+ * Double buffering (page flip) state.
+ *
+ * The previous approach waited for vsync and then wrote the whole frame
+ * directly into the SAME buffer the panel is scanning out. On this
+ * hardware a full software raster (2x blit or 1:1) takes long enough that
+ * the panel's scan position laps the write position more than once per
+ * frame, producing several drifting diagonal tear lines -- waiting for
+ * vsync only fixed where the FIRST tear starts, not the rest.
+ *
+ * If the running kernel's w100fb reports ypanstep (added 2026-07-27 to
+ * support this), we instead request a doubled virtual framebuffer, draw
+ * each frame entirely into the currently INVISIBLE page, and then pan to
+ * it with FBIOPAN_DISPLAY once the draw is complete. w100fb's pan handler
+ * itself waits for a clean vblank edge before flipping GRAPHIC_OFFSET, so
+ * the flip is atomic from the panel's point of view -- zero tearing,
+ * regardless of how long the software blit takes (as long as it's under
+ * one refresh period on average).
+ *
+ * Falls back to the old single-buffer direct-write path (with optional
+ * QUAKE_VSYNC gate) on older kernels that don't support panning.
+ */
+static int fb_pageflip_active = 0;
+static int fb_back_page = 1;      /* page index we draw into next */
+static int fb_page_bytes = 0;     /* line_len * height, i.e. one page */
 
 /* pre-built 8-bit index → RGB565 palette */
 static unsigned short palette16[256];
@@ -141,11 +172,53 @@ static int evkey_to_quake(unsigned int code)
     }
 }
 
+/* ── VT ownership ───────────────────────────────────────────────────────── */
+
+/*
+ * Put the active VT into KD_GRAPHICS so fbcon stops drawing its text
+ * cursor / any console output on top of our framebuffer writes. Without
+ * this, whatever's still attached to the console can scribble over the
+ * game image at any time -- purely a display glitch, not a crash, but a
+ * visible one. Best-effort: if there's no accessible tty (e.g. launched
+ * detached from any console), just skip it silently.
+ */
+static void tty_graphics_mode(void)
+{
+    tty_fd = open("/dev/tty0", O_RDWR);
+    if (tty_fd < 0)
+        tty_fd = open("/dev/console", O_RDWR);
+    if (tty_fd < 0) {
+        fprintf(stderr, "vid_fb: no console tty available, "
+                "fbcon text/cursor may still draw over the screen\n");
+        return;
+    }
+    if (ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) < 0) {
+        fprintf(stderr, "vid_fb: KDSETMODE KD_GRAPHICS failed (%s)\n",
+                strerror(errno));
+        close(tty_fd);
+        tty_fd = -1;
+        return;
+    }
+    tty_in_graphics_mode = 1;
+}
+
+static void tty_text_mode(void)
+{
+    if (tty_fd >= 0) {
+        if (tty_in_graphics_mode)
+            ioctl(tty_fd, KDSETMODE, KD_TEXT);
+        close(tty_fd);
+        tty_fd = -1;
+    }
+    tty_in_graphics_mode = 0;
+}
+
 /* ── cleanup ────────────────────────────────────────────────────────────── */
 
 static void fb_cleanup(void)
 {
     int i;
+    tty_text_mode();
     if (fb_mem != MAP_FAILED) {
         memset(fb_mem, 0, (size_t)fb_mem_size);
         munmap(fb_mem, (size_t)fb_mem_size);
@@ -209,7 +282,29 @@ void CreateQtWindow(void)
     fb_height   = (int)vinfo.yres;
     fb_bpp      = (int)vinfo.bits_per_pixel;
     fb_line_len = (int)finfo.line_length;
-    fb_mem_size = fb_line_len * fb_height;
+    fb_page_bytes = fb_line_len * fb_height;
+    fb_mem_size = fb_page_bytes;
+
+    /*
+     * Try to get a doubled virtual framebuffer for page flipping. Only
+     * attempt this if the driver actually advertises ypanstep -- older
+     * kernels (ypanstep==0) don't support panning at all and would just
+     * fail FBIOPAN_DISPLAY every frame.
+     */
+    if (finfo.ypanstep > 0) {
+        struct fb_var_screeninfo req = vinfo;
+        req.yres_virtual = vinfo.yres * 2;
+        req.xoffset = 0;
+        req.yoffset = 0;
+        if (ioctl(fb_fd, FBIOPUT_VSCREENINFO, &req) == 0 &&
+            req.yres_virtual >= vinfo.yres * 2) {
+            fb_mem_size = fb_page_bytes * 2;
+            fb_pageflip_active = 1;
+        } else {
+            fprintf(stderr, "vid_fb: doubled virtual fb not available, "
+                    "falling back to single-buffer direct write\n");
+        }
+    }
 
     fb_mem = mmap(NULL, (size_t)fb_mem_size,
                   PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
@@ -220,10 +315,15 @@ void CreateQtWindow(void)
     }
 
     memset(fb_mem, 0, (size_t)fb_mem_size);
+    tty_graphics_mode();
     fprintf(stderr, "vid_fb: %dx%d %dbpp line=%d\n",
             fb_width, fb_height, fb_bpp, fb_line_len);
-    if (fb_use_vsync)
-        fprintf(stderr, "vid_fb: vsync wait enabled\n");
+    if (fb_pageflip_active) {
+        fb_back_page = 1;
+        fprintf(stderr, "vid_fb: page flip enabled (double-buffered)\n");
+    } else if (fb_use_vsync) {
+        fprintf(stderr, "vid_fb: vsync wait enabled (single-buffer)\n");
+    }
 
     /* open evdev input devices */
     for (i = 0; i < 16 && input_nfds < MAX_INPUT_FDS; i++) {
@@ -263,7 +363,8 @@ void SetQtPalette(unsigned char *palette)
 void RepaintQtWindow(void)
 {
     const unsigned char *src;
-    int rb, py, px;
+    int rb;
+    unsigned char *dst_base;
 
     if (fb_mem == MAP_FAILED || fb_bpp != 16)
         return;
@@ -271,23 +372,29 @@ void RepaintQtWindow(void)
     src = (const unsigned char *)vid.buffer;
     rb  = vid.rowbytes;
 
+    if (fb_pageflip_active) {
+        /* Always draw into the currently invisible page. */
+        dst_base = (unsigned char *)fb_mem + (fb_back_page * fb_page_bytes);
+    } else {
+        dst_base = (unsigned char *)fb_mem;
 #ifdef FBIO_WAITFORVSYNC
-    if (fb_use_vsync && fb_fd >= 0) {
-        int vblank = 0;
-        if (ioctl(fb_fd, FBIO_WAITFORVSYNC, &vblank) < 0) {
-            /* Some fb drivers do not implement this ioctl; fall back silently after one warning. */
-            if (errno == ENOTTY || errno == EINVAL || errno == ENOSYS) {
-                fprintf(stderr, "vid_fb: vsync ioctl unsupported, disabling\n");
-                fb_use_vsync = 0;
+        if (fb_use_vsync && fb_fd >= 0) {
+            int vblank = 0;
+            if (ioctl(fb_fd, FBIO_WAITFORVSYNC, &vblank) < 0) {
+                /* Some fb drivers do not implement this ioctl; fall back silently after one warning. */
+                if (errno == ENOTTY || errno == EINVAL || errno == ENOSYS) {
+                    fprintf(stderr, "vid_fb: vsync ioctl unsupported, disabling\n");
+                    fb_use_vsync = 0;
+                }
             }
         }
-    }
 #else
-    if (fb_use_vsync) {
-        fprintf(stderr, "vid_fb: vsync unavailable at build time\n");
-        fb_use_vsync = 0;
-    }
+        if (fb_use_vsync) {
+            fprintf(stderr, "vid_fb: vsync unavailable at build time\n");
+            fb_use_vsync = 0;
+        }
 #endif
+    }
 
     if (vid.width * 2 == fb_width && vid.height * 2 == fb_height) {
         /*
@@ -295,7 +402,6 @@ void RepaintQtWindow(void)
          * Pair of shorts written as a 32-bit store to halve uncached writes.
          */
         int sw = vid.width, sh = vid.height;
-        unsigned char *dst_base = (unsigned char *)fb_mem;
         int y, x;
         for (y = 0; y < sh; y++) {
             const unsigned char *srow = src + y * rb;
@@ -316,7 +422,6 @@ void RepaintQtWindow(void)
         int bw = sw < fb_width  ? sw : fb_width;
         int bh = sh < fb_height ? sh : fb_height;
         int stride_shorts = fb_line_len / 2;
-        unsigned char *dst_base = (unsigned char *)fb_mem;
         int y, x;
         for (y = 0; y < fb_height; y++) {
             unsigned short *drow =
@@ -332,6 +437,29 @@ void RepaintQtWindow(void)
                        (size_t)fb_width * sizeof(unsigned short));
             }
         }
+    }
+
+    if (fb_pageflip_active) {
+        struct fb_var_screeninfo pan;
+
+        memset(&pan, 0, sizeof(pan));
+        if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &pan) < 0) {
+            fprintf(stderr, "vid_fb: FBIOGET_VSCREENINFO failed, "
+                    "disabling page flip\n");
+            fb_pageflip_active = 0;
+            return;
+        }
+        pan.xoffset = 0;
+        pan.yoffset = fb_back_page * fb_height;
+        if (ioctl(fb_fd, FBIOPAN_DISPLAY, &pan) < 0) {
+            fprintf(stderr, "vid_fb: FBIOPAN_DISPLAY failed (%s), "
+                    "disabling page flip\n", strerror(errno));
+            fb_pageflip_active = 0;
+            return;
+        }
+        /* The page we just made visible becomes off-screen again next
+         * frame's write target's PAIR -- draw into the other page now. */
+        fb_back_page = 1 - fb_back_page;
     }
 }
 
