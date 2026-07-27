@@ -1,6 +1,2 @@
 #!/bin/sh
-# No `exec`: this shell must survive the game (however it exits -- clean
-# exit, SIGTERM, or an uncatchable SIGKILL/crash) so fbtext always runs.
-cd /mnt/card
-./quake-fb-launcher
-fbtext
+cd /mnt/card && exec fbrun ./quake-fb-launcher
