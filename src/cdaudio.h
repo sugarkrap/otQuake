@@ -25,3 +25,4 @@ void CDAudio_Pause(void);
 void CDAudio_Resume(void);
 void CDAudio_Shutdown(void);
 void CDAudio_Update(void);
+void CDAudio_MixMusic(portable_samplepair_t *buffer, int count);

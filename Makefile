@@ -42,7 +42,7 @@ OBJDIR := obj
 # Source list from original Makefile.in, with vid_qt.cpp replaced by vid_fb.c.
 SRCS := \
 	FixedPointMath.c \
-	cd_null.c     chase.c       cl_demo.c     cl_input.c    cl_main.c  \
+	cd_wav.c      chase.c       cl_demo.c     cl_input.c    cl_main.c  \
 	cl_parse.c    cl_tent.c     cmd.c         common.c      console.c  \
 	crc.c         cvar.c        d_edge.c      d_fill.c      d_init.c   \
 	d_modech.c    d_part.c      d_polyse.c    d_scan.c      d_sky.c    \
