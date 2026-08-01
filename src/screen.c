@@ -20,6 +20,22 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "quakedef.h"
+
+// Times the palette-lookup + pixel-doubling blit into /dev/fb0 (see vid_fb.c)
+// into the r_profile PROF_BLIT bucket. Uncached framebuffer writes are a prime
+// suspect on this hardware, and they sit outside R_RenderView_ entirely, so
+// they would otherwise never show up in any renderer timing.
+#define PROF_VID_UPDATE(r) \
+	do { \
+		if (r_prof_active) { \
+			double _t = Sys_FloatTime (); \
+			VID_Update (r); \
+			r_prof_acc[PROF_BLIT] += Sys_FloatTime () - _t; \
+		} else { \
+			VID_Update (r); \
+		} \
+	} while (0)
+
 #include "r_local.h"
 
 // only the refresh window will be updated unless these variables are flagged 
@@ -1160,7 +1176,7 @@ void SCR_UpdateScreen (void)
 		vrect.height = vid.height;
 		vrect.pnext = 0;
 	
-		VID_Update (&vrect);
+		PROF_VID_UPDATE (&vrect);
 	}
 	else if (scr_copytop)
 	{
@@ -1170,7 +1186,7 @@ void SCR_UpdateScreen (void)
 		vrect.height = vid.height - sb_lines;
 		vrect.pnext = 0;
 	
-		VID_Update (&vrect);
+		PROF_VID_UPDATE (&vrect);
 	}	
 	else
 	{
@@ -1180,7 +1196,7 @@ void SCR_UpdateScreen (void)
 		vrect.height = scr_vrect.height;
 		vrect.pnext = 0;
 	
-		VID_Update (&vrect);
+		PROF_VID_UPDATE (&vrect);
 	}
 }
 

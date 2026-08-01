@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // d_edge.c
 
 #include "quakedef.h"
+#include "r_local.h"		// r_profile buckets (PROF_*) used below
 #include "d_local.h"
 #ifdef _WIN32 // JR
 #include "../logfloat.h"
@@ -479,8 +480,17 @@ void D_DrawSurfaces (void)
 				}
 
 				D_CalcGradients (pface);
-				Turbulent8 (s->spans);
-				D_DrawZSpans (s->spans);
+				{
+					PROF_T0 (t_turb);
+					Turbulent8 (s->spans);
+					PROF_T1 (t_turb, PROF_SURF_SPAN);
+				}
+				{
+					PROF_T0 (t_z);
+					D_DrawZSpans (s->spans);
+					PROF_T1 (t_z, PROF_SURF_ZSPAN);
+				}
+				r_prof_surfs++;
 
 				if (s->insubmodel)
 				{
@@ -519,16 +529,29 @@ void D_DrawSurfaces (void)
 				* pface->texinfo->mipadjust);
 
 			// FIXME: make this passed in to D_CacheSurface
-				pcurrentcache = D_CacheSurface (pface, miplevel);
+				{
+					PROF_T0 (t_cache);
+					pcurrentcache = D_CacheSurface (pface, miplevel);
+					PROF_T1 (t_cache, PROF_SURF_CACHE);
+				}
 
 				cacheblock = (pixel_t *)pcurrentcache->data;
 				cachewidth = pcurrentcache->width;
 
 				D_CalcGradients (pface);
 
-				(*d_drawspans) (s->spans);
+				{
+					PROF_T0 (t_span);
+					(*d_drawspans) (s->spans);
+					PROF_T1 (t_span, PROF_SURF_SPAN);
+				}
 
-				D_DrawZSpans (s->spans);
+				{
+					PROF_T0 (t_z);
+					D_DrawZSpans (s->spans);
+					PROF_T1 (t_z, PROF_SURF_ZSPAN);
+				}
+				r_prof_surfs++;
 
 				if (s->insubmodel)
 				{

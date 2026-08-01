@@ -83,6 +83,46 @@ extern cvar_t	r_fullbright;
 extern cvar_t	r_drawentities;
 extern cvar_t	r_aliasstats;
 extern cvar_t	r_dspeeds;
+
+//
+// r_profile -- accumulating frame profiler.
+//
+// r_dspeeds already splits the frame six ways, but it Con_Printf's one line
+// per frame, which is unreadable over a 969-frame timedemo and perturbs what
+// it measures. These buckets accumulate instead and are reported once, and
+// they additionally split the scan-edge bucket (which is where the world
+// actually gets textured) into surface-cache building, span texturing and
+// z-span writes -- the three candidates for where the time really goes.
+//
+typedef enum {
+	PROF_WORLD,		// R_RenderWorld: BSP walk + edge emission
+	PROF_BMODEL,	// R_DrawBEntitiesOnList
+	PROF_SCAN,		// R_ScanEdges (includes the three PROF_SURF_* below)
+	PROF_ENTITY,	// R_DrawEntitiesOnList (alias models)
+	PROF_VIEWMODEL,	// R_DrawViewModel
+	PROF_PARTICLE,	// R_DrawParticles
+	PROF_SURF_CACHE,// D_CacheSurface (lightmap blend into the surface cache)
+	PROF_SURF_SPAN,	// (*d_drawspans) / Turbulent8 / sky -- the texture mapper
+	PROF_SURF_ZSPAN,// D_DrawZSpans
+	PROF_BLIT,		// VID_Update: palette lookup + 2x doubling into /dev/fb0
+	PROF_FRAME,		// whole R_RenderView_
+	PROF_COUNT
+} r_profbucket_t;
+
+extern cvar_t	r_profile;
+extern double	r_prof_acc[PROF_COUNT];
+extern int		r_prof_frames;
+extern int		r_prof_surfs;
+extern int		r_prof_active;	// cached: r_profile.value != 0
+
+void R_ProfReset (void);
+void R_ProfReport (void);
+
+// Sub-bucket timing is per-surface, so keep it to two Sys_FloatTime() calls
+// per region and compile to nothing at all when profiling is off.
+#define PROF_T0(v)		double v = r_prof_active ? Sys_FloatTime () : 0.0
+#define PROF_T1(v,b)	do { if (r_prof_active) \
+							r_prof_acc[b] += Sys_FloatTime () - (v); } while (0)
 extern cvar_t	r_drawflat;
 extern cvar_t	r_ambient;
 extern cvar_t	r_reportsurfout;

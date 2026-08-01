@@ -198,6 +198,8 @@ extern	struct texture_s	*r_notexture_mip;
 
 
 void R_Init (void);
+void R_ProfReset (void);	// r_profile: zero the accumulators
+void R_ProfReport (void);	// r_profile: dump per-phase totals
 void R_InitFPM (void);
 void R_InitTextures (void);
 void R_InitEfrags (void);

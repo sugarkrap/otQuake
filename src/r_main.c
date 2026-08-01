@@ -174,6 +174,7 @@ cvar_t	r_drawentities = {"r_drawentities","1"};
 cvar_t	r_drawviewmodel = {"r_drawviewmodel","1"};
 cvar_t	r_aliasstats = {"r_polymodelstats","0"};
 cvar_t	r_dspeeds = {"r_dspeeds","0"};
+cvar_t	r_profile = {"r_profile","0"};	// accumulate per-phase times, report via R_ProfReport
 cvar_t	r_drawflat = {"r_drawflat", "0"};
 cvar_t	r_ambient = {"r_ambient", "0"};
 cvar_t	r_reportsurfout = {"r_reportsurfout", "0"};
@@ -257,6 +258,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_aliasstats);
 	Cvar_RegisterVariable (&r_dspeeds);
+	Cvar_RegisterVariable (&r_profile);
 	Cvar_RegisterVariable (&r_reportsurfout);
 	Cvar_RegisterVariable (&r_maxsurfs);
 	Cvar_RegisterVariable (&r_numsurfs);
@@ -321,6 +323,7 @@ void R_InitFPM (void)
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_aliasstats);
 	Cvar_RegisterVariable (&r_dspeeds);
+	Cvar_RegisterVariable (&r_profile);
 	Cvar_RegisterVariable (&r_reportsurfout);
 	Cvar_RegisterVariable (&r_maxsurfs);
 	Cvar_RegisterVariable (&r_numsurfs);
@@ -1611,7 +1614,7 @@ void R_EdgeDrawing (void)
 	
 	R_BeginEdgeFrame ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		rw_time1 = (float)Sys_FloatTime ();
 	}
@@ -1625,7 +1628,7 @@ void R_EdgeDrawing (void)
 // z writes, so have the driver turn z compares on now
 	D_TurnZOn ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		rw_time2 = (float)Sys_FloatTime ();
 		db_time1 = rw_time2;
@@ -1633,7 +1636,7 @@ void R_EdgeDrawing (void)
 
 	R_DrawBEntitiesOnList ();
 
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		db_time2 = (float)Sys_FloatTime ();
 		se_time1 = db_time2;
@@ -1684,7 +1687,7 @@ void R_EdgeDrawingFPM (void)
 	
 	R_BeginEdgeFrameFPM ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		rw_time1 = (float)Sys_FloatTime ();
 	}
@@ -1698,7 +1701,7 @@ void R_EdgeDrawingFPM (void)
 // z writes, so have the driver turn z compares on now
 	//D_TurnZOn ();	//Dan: empty func
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		rw_time2 = (float)Sys_FloatTime ();
 		db_time1 = rw_time2;
@@ -1706,7 +1709,7 @@ void R_EdgeDrawingFPM (void)
 
 	R_DrawBEntitiesOnListFPM ();
 
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		db_time2 = (float)Sys_FloatTime ();
 		se_time1 = db_time2;
@@ -1752,7 +1755,9 @@ void R_RenderView_ (void)
 
 	r_warpbuffer = warpbuffer;
 	
-	if (r_timegraph.value || r_speeds.value || r_dspeeds.value)
+	r_prof_active = (r_profile.value != 0);
+
+	if (r_timegraph.value || r_speeds.value || r_dspeeds.value || r_prof_active)
 		r_time1 = (float)Sys_FloatTime ();
 
 	R_SetupFrame ();
@@ -1788,7 +1793,7 @@ SetVisibilityByPassages ();
 		VID_LockBuffer ();
 	}
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		se_time2 = (float)Sys_FloatTime ();
 		de_time1 = se_time2;
@@ -1796,7 +1801,7 @@ SetVisibilityByPassages ();
 
 	R_DrawEntitiesOnList ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		de_time2 = (float)Sys_FloatTime ();
 		dv_time1 = de_time2;
@@ -1804,7 +1809,7 @@ SetVisibilityByPassages ();
 
 	R_DrawViewModel ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		dv_time2 = (float)Sys_FloatTime ();
 		dp_time1 = (float)Sys_FloatTime ();
@@ -1812,7 +1817,7 @@ SetVisibilityByPassages ();
 
 	R_DrawParticles ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 		dp_time2 = (float)Sys_FloatTime ();
 
 	if (r_dowarp)
@@ -1831,6 +1836,18 @@ SetVisibilityByPassages ();
 
 	if (r_dspeeds.value)
 		R_PrintDSpeeds ();
+
+	if (r_prof_active)
+	{
+		r_prof_acc[PROF_WORLD]     += rw_time2 - rw_time1;
+		r_prof_acc[PROF_BMODEL]    += db_time2 - db_time1;
+		r_prof_acc[PROF_SCAN]      += se_time2 - se_time1;
+		r_prof_acc[PROF_ENTITY]    += de_time2 - de_time1;
+		r_prof_acc[PROF_VIEWMODEL] += dv_time2 - dv_time1;
+		r_prof_acc[PROF_PARTICLE]  += dp_time2 - dp_time1;
+		r_prof_acc[PROF_FRAME]     += Sys_FloatTime () - r_time1;
+		r_prof_frames++;
+	}
 
 	if (r_reportsurfout.value && r_outofsurfaces)
 		Con_Printf ("Short %d surfaces\n", r_outofsurfaces);
@@ -1851,7 +1868,9 @@ void R_RenderViewFPM_ (void)
 
 	r_warpbuffer = warpbuffer;
 	
-	if (r_timegraph.value || r_speeds.value || r_dspeeds.value)
+	r_prof_active = (r_profile.value != 0);
+
+	if (r_timegraph.value || r_speeds.value || r_dspeeds.value || r_prof_active)
 		r_time1 = (float)Sys_FloatTime ();
 	
 	R_SetupFrameFPM ();
@@ -1887,7 +1906,7 @@ void R_RenderViewFPM_ (void)
 		VID_LockBuffer ();
 	}
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		se_time2 = (float)Sys_FloatTime ();
 		de_time1 = se_time2;
@@ -1895,7 +1914,7 @@ void R_RenderViewFPM_ (void)
 
 	R_DrawEntitiesOnListFPM ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		de_time2 = (float)Sys_FloatTime ();
 		dv_time1 = de_time2;
@@ -1903,7 +1922,7 @@ void R_RenderViewFPM_ (void)
 
 	R_DrawViewModelFPM ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 	{
 		dv_time2 = (float)Sys_FloatTime ();
 		dp_time1 = (float)Sys_FloatTime ();
@@ -1911,7 +1930,7 @@ void R_RenderViewFPM_ (void)
 
 	R_DrawParticlesFPM ();
 	
-	if (r_dspeeds.value)
+	if (r_dspeeds.value || r_prof_active)
 		dp_time2 = (float)Sys_FloatTime ();
 
 	if (r_dowarp)
@@ -1930,6 +1949,18 @@ void R_RenderViewFPM_ (void)
 
 	if (r_dspeeds.value)
 		R_PrintDSpeeds ();
+
+	if (r_prof_active)
+	{
+		r_prof_acc[PROF_WORLD]     += rw_time2 - rw_time1;
+		r_prof_acc[PROF_BMODEL]    += db_time2 - db_time1;
+		r_prof_acc[PROF_SCAN]      += se_time2 - se_time1;
+		r_prof_acc[PROF_ENTITY]    += de_time2 - de_time1;
+		r_prof_acc[PROF_VIEWMODEL] += dv_time2 - dv_time1;
+		r_prof_acc[PROF_PARTICLE]  += dp_time2 - dp_time1;
+		r_prof_acc[PROF_FRAME]     += Sys_FloatTime () - r_time1;
+		r_prof_frames++;
+	}
 
 	if (r_reportsurfout.value && r_outofsurfaces)
 		Con_Printf ("Short %d surfaces\n", r_outofsurfaces);
