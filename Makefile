@@ -1,26 +1,30 @@
 # Makefile for handheldquake — ARMv5 Zaurus targets
 #
-# Toolchain: ARM EABI uClibc-ng, built by the dosbox-armv5-zaurus Buildroot.
-# Run the dosbox Buildroot first (scripts/02-build.sh in that repo) to
-# produce the toolchain at:
-#   ../dosbox-armv5-zaurus/buildroot/output/host/bin/
+# Toolchain: ARM EABI uClibc-ng, the crosstool-NG one from the sibling piko
+# repo at ../piko/toolchain/x-tools/. Build piko first if it is missing.
 #
-# Binaries are built as ARM EABI soft-float and linked statically for
-# portability across minimal rootfs images.
+# quake-fb is ARM EABI soft-float and linked statically, for portability
+# across minimal rootfs images. quake-x11 links dynamically -- see the X11
+# section below for why.
 #
 # Usage:
-#   make              → cross-compile for SL-C860
+#   make              → cross-compile quake-fb for SL-C860
+#   make x11          → cross-compile quake-x11 (runs under Matchbox)
+#   make host         → native build for testing sound on the dev machine
 #   make strip        → strip the binary in-place
 #   make clean        → remove obj/ and binary
 #   make extract      → (re)extract CVS source into src/
 #   make check-toolchain → verify the toolchain is present
+#   make check-x11    → verify piko's staged X11 headers are present
 
 # ── Toolchain ────────────────────────────────────────────────────────────────
 
-# Buildroot EABI uClibc-ng toolchain produced by dosbox-armv5-zaurus.
-DOSBOX_BR := $(abspath ../dosbox-armv5-zaurus/buildroot/output/host/bin)
-CROSS      ?= arm-buildroot-linux-uclibcgnueabi
-CROSS_PATH := $(DOSBOX_BR)
+# crosstool-NG EABI uClibc-ng toolchain from the sibling piko repo. Its
+# sysroot ships libuClibc-1.0.54.so, byte-for-byte the runtime on the device,
+# so dynamically linked binaries built here load there.
+PIKO       := $(abspath ../piko)
+CROSS      ?= arm-unknown-linux-uclibcgnueabi
+CROSS_PATH ?= $(PIKO)/toolchain/x-tools/$(CROSS)/bin
 
 CC    := $(CROSS_PATH)/$(CROSS)-gcc
 STRIP := $(CROSS_PATH)/$(CROSS)-strip
@@ -79,7 +83,8 @@ HOST_TARGET  := quake-host
 HOST_SRCS := $(filter-out snd_sun.c,$(SRCS)) snd_alsa.c
 HOST_OBJS := $(patsubst %.c,$(HOST_OBJDIR)/%.o,$(HOST_SRCS))
 
-.PHONY: all clean extract strip check-toolchain host clean-host
+.PHONY: all clean extract strip strip-x11 check-toolchain check-x11 x11 \
+        host clean-host
 
 all: $(SRCDIR)/vid_fb.c $(TARGET) $(LAUNCHER)
 
@@ -97,16 +102,64 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
+# ── X11 target ────────────────────────────────────────────────────────────────
+#
+# Same engine, vid_x11.c in place of vid_fb.c: renders into an X window
+# instead of taking over /dev/fb0, so it can run alongside Matchbox with the
+# panel visible. See the header of src/vid_x11.c for why that is needed.
+#
+# This one links DYNAMICALLY, unlike quake-fb. The device has a dynamic
+# linker (/lib/ld-uClibc.so.1) and the whole X11 stack in /lib, and piko
+# stages libX11 as a shared object only -- there is no libX11.a to link
+# statically against.
+
+PIKO_STAGE  ?= $(PIKO)/userspace/stage-target
+X11_CFLAGS  := -I$(PIKO_STAGE)/usr/include
+# -rpath-link lets the linker resolve libX11's own NEEDED entries (libxcb,
+# libXau, libXdmcp) without us naming each one.
+X11_LDFLAGS := -L$(PIKO_STAGE)/usr/lib -Wl,-rpath-link,$(PIKO_STAGE)/usr/lib \
+               -lX11 -lXext -lm
+
+X11_SRCS   := $(patsubst vid_fb.c,vid_x11.c,$(SRCS))
+X11_OBJDIR := obj-x11
+X11_OBJS   := $(patsubst %.c,$(X11_OBJDIR)/%.o,$(X11_SRCS))
+TARGET_X11 := quake-x11
+
+x11: $(TARGET_X11)
+
+$(TARGET_X11): $(X11_OBJS)
+	$(CC) $(ARCHFLAGS) -o $@ $^ $(X11_LDFLAGS)
+	@echo "Built $@ (EABI, dynamic)"
+
+$(X11_OBJDIR)/%.o: $(SRCDIR)/%.c | $(X11_OBJDIR)
+	$(CC) $(CFLAGS) $(X11_CFLAGS) -c -o $@ $<
+
+$(X11_OBJDIR):
+	mkdir -p $(X11_OBJDIR)
+
+check-x11:
+	@if [ -f "$(PIKO_STAGE)/usr/include/X11/Xlib.h" ]; then \
+		echo "X11 stage OK: $(PIKO_STAGE)"; \
+	else \
+		echo "ERROR: no X11 headers at $(PIKO_STAGE)/usr/include/X11/"; \
+		echo "Build piko's X11 stack first (tools/build-x11-stack.sh)."; \
+		exit 1; \
+	fi
+
 strip: $(TARGET) $(LAUNCHER)
 	$(STRIP) $(TARGET) $(LAUNCHER)
 	@echo "Stripped $(TARGET) ($(shell wc -c < $(TARGET)) bytes)"
 	@echo "Stripped $(LAUNCHER) ($(shell wc -c < $(LAUNCHER)) bytes)"
 
+strip-x11: $(TARGET_X11)
+	$(STRIP) $(TARGET_X11)
+	@echo "Stripped $(TARGET_X11) ($(shell wc -c < $(TARGET_X11)) bytes)"
+
 extract:
 	python3 extract-src.py
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(LAUNCHER)
+	rm -rf $(OBJDIR) $(X11_OBJDIR) $(TARGET) $(TARGET_X11) $(LAUNCHER)
 
 host: $(HOST_TARGET)
 
@@ -134,6 +187,6 @@ check-toolchain:
 		echo "(EABI flag present — correct)"; \
 	else \
 		echo "ERROR: toolchain not found at $(CROSS_PATH)/"; \
-		echo "Build the dosbox-armv5-zaurus Buildroot first."; \
+		echo "Build the piko toolchain first."; \
 		exit 1; \
 	fi

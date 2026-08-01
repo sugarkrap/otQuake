@@ -1,2 +1,6 @@
 #!/bin/sh
-cd /mnt/card && exec fbrun ./quake-fb-launcher
+# Binaries live on the card (/mnt/card/.zaurus/usr/bin, already on PATH via
+# /etc/zaurus-card.sh); game data is /mnt/card/id1. fbrun restores the console.
+BIN=/mnt/card/.zaurus/usr/bin
+[ -x "$BIN/quake-fb" ] || { echo "quake: no card at $BIN" >&2; exit 1; }
+QUAKE_BIN="$BIN/quake-fb" exec fbrun "$BIN/quake-fb-launcher" "$@"

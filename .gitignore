@@ -13,5 +13,7 @@
 /obj/
 /quake-fb
 /quake-fb-launcher
+/obj-x11/
+/quake-x11
 /obj-host/
 /quake-host
