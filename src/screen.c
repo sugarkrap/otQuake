@@ -47,6 +47,18 @@ cvar_t		scr_showpause = {"showpause","1"};
 cvar_t		show_fps = {"show_fps","0",true};
 cvar_t		scr_printspeed = {"scr_printspeed","8"};
 
+/*
+ * r_dynamicscale automatically steps "viewsize" down when the measured
+ * frame rate falls below r_dynamicscale_target, and back up again once
+ * there is comfortable headroom above it -- the same trick modern engines
+ * call dynamic resolution scaling, built on top of Quake's existing
+ * viewsize mechanism (a smaller 3D viewport is directly fewer pixels for
+ * the software rasterizer to fill). Set r_dynamicscale to "0" to go back
+ * to manual sizeup/sizedown control.
+ */
+cvar_t		r_dynamicscale = {"r_dynamicscale","1"};
+cvar_t		r_dynamicscale_target = {"r_dynamicscale_target","25"};
+
 qboolean	scr_initialized;		// ready to draw
 
 qpic_t		*scr_ram;
@@ -393,6 +405,8 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&show_fps);
 	Cvar_RegisterVariable (&scr_centertime);
 	Cvar_RegisterVariable (&scr_printspeed);
+	Cvar_RegisterVariable (&r_dynamicscale);
+	Cvar_RegisterVariable (&r_dynamicscale_target);
 
 //
 // register our commands
@@ -506,6 +520,68 @@ void SCR_DrawFPS (void)
 
 	/* 8px character cells, so 8 per character wide plus a small margin. */
 	Draw_String (vid.width - (strlen(fps_text) * 8) - 8, 8, fps_text);
+}
+
+
+/*
+==============
+SCR_UpdateDynamicScale
+
+Dynamic resolution scaling, Quake-style: viewsize already controls how
+many pixels the software rasterizer has to fill each frame, so stepping
+it down under load and back up once there's headroom gets the same
+effect modern engines get from resizing a render target. Uses the same
+one-second measurement window as SCR_DrawFPS, just not gated on
+show_fps so it works whether or not the counter is on screen.
+==============
+*/
+#define SCR_DYNSCALE_FLOOR	60
+#define SCR_DYNSCALE_CEIL	100
+#define SCR_DYNSCALE_STEP	10
+
+void SCR_UpdateDynamicScale (void)
+{
+	static double	last_time;
+	static int		frame_count;
+	double			now, fps;
+
+	if (!r_dynamicscale.value)
+	{
+		last_time = 0;
+		frame_count = 0;
+		return;
+	}
+
+	frame_count++;
+	now = realtime;
+
+	if (last_time == 0)			/* first call: start the window here */
+	{
+		last_time = now;
+		return;
+	}
+
+	if (now - last_time < 1.0)
+		return;
+
+	fps = frame_count / (now - last_time);
+	frame_count = 0;
+	last_time = now;
+
+	if (fps < r_dynamicscale_target.value && scr_viewsize.value > SCR_DYNSCALE_FLOOR)
+	{
+		float	newsize = scr_viewsize.value - SCR_DYNSCALE_STEP;
+		if (newsize < SCR_DYNSCALE_FLOOR)
+			newsize = SCR_DYNSCALE_FLOOR;
+		Cvar_SetValue ("viewsize", newsize);
+	}
+	else if (fps > r_dynamicscale_target.value * 1.3 && scr_viewsize.value < SCR_DYNSCALE_CEIL)
+	{
+		float	newsize = scr_viewsize.value + SCR_DYNSCALE_STEP;
+		if (newsize > SCR_DYNSCALE_CEIL)
+			newsize = SCR_DYNSCALE_CEIL;
+		Cvar_SetValue ("viewsize", newsize);
+	}
 }
 
 
@@ -948,6 +1024,8 @@ void SCR_UpdateScreen (void)
 
 	if (!scr_initialized || !con_initialized)
 		return;				// not initialized yet
+
+	SCR_UpdateDynamicScale ();
 
 	if (scr_viewsize.value != oldscr_viewsize)
 	{

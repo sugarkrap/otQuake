@@ -33,8 +33,9 @@ entity_t		*currententity;
 
 vec3_t			modelorg, base_modelorg;
 
-// squared hard-fog distance for the current frame; <= 0 means disabled
+// squared hard-fog distances for the current frame; <= 0 means disabled
 float			r_farclip2;
+float			r_farclip_fx2;
 
 #ifdef USE_PQ_OPT1
 int				modelorg_fxp[3];
@@ -525,13 +526,14 @@ void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 	msurface_t	*surf, **mark;
 	mleaf_t		*pleaf;
 	double		dot;
+	float		node_distsq;
 #ifdef USE_PQ_OPT1
 	int			d_fxp;
 #else
 	double		d;
 	vec3_t		acceptpt, rejectpt;
 #endif
-	
+
 	if (node->contents == CONTENTS_SOLID)
 		return;		// solid
 
@@ -539,8 +541,11 @@ void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 		return;
 
 // hard-fog / draw-distance cull: reject the whole subtree once its closest
-// point to the viewer is already beyond the fog distance
-	if (r_farclip2 > 0)
+// point to the viewer is already beyond the fog distance. node_distsq is
+// reused below to give water/sky surfaces their own, shorter cutoff.
+	node_distsq = -1;
+
+	if (r_farclip2 > 0 || r_farclip_fx2 > 0)
 	{
 		float	cx, cy, cz, dx, dy, dz;
 
@@ -555,7 +560,9 @@ void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 		dy = cy - modelorg[1];
 		dz = cz - modelorg[2];
 
-		if (dx*dx + dy*dy + dz*dz > r_farclip2)
+		node_distsq = dx*dx + dy*dy + dz*dz;
+
+		if (r_farclip2 > 0 && node_distsq > r_farclip2)
 			return;
 	}
 
@@ -701,7 +708,9 @@ void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 						else
 						{
 */
-							R_RenderFace (surf, clipflags);
+							if (!(r_farclip_fx2 > 0 && node_distsq > r_farclip_fx2 &&
+								  (surf->flags & (SURF_DRAWTURB | SURF_DRAWSKY))))
+								R_RenderFace (surf, clipflags);
 /*
 						}
 					}
@@ -737,7 +746,9 @@ void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 						else
 						{
 */
-							R_RenderFace (surf, clipflags);
+							if (!(r_farclip_fx2 > 0 && node_distsq > r_farclip_fx2 &&
+								  (surf->flags & (SURF_DRAWTURB | SURF_DRAWSKY))))
+								R_RenderFace (surf, clipflags);
 /*
 						}
 					}
@@ -773,6 +784,7 @@ void R_RenderWorld (void)
 	VectorCopy (r_origin, modelorg);
 
 	r_farclip2 = (r_farclip.value > 0) ? r_farclip.value * r_farclip.value : 0;
+	r_farclip_fx2 = (r_farclip_fx.value > 0) ? r_farclip_fx.value * r_farclip_fx.value : 0;
 
 #ifdef USE_PQ_OPT1
 	modelorg_fxp[0]=(int)(r_origin[0]*524288.0);
