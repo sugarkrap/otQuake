@@ -212,12 +212,53 @@ static qboolean CDAudio_OpenTrack (byte track)
 	return true;
 }
 
+static void CD_f (void)
+{
+	char	*command;
+
+	if (Cmd_Argc () < 2)
+	{
+		Con_Printf ("commands: play <track>, stop, pause, resume, info\n");
+		return;
+	}
+
+	command = Cmd_Argv (1);
+
+	if (!Q_strcasecmp (command, "play") || !Q_strcasecmp (command, "loop"))
+	{
+		if (Cmd_Argc () < 3)
+		{
+			Con_Printf ("cd %s <track>\n", command);
+			return;
+		}
+		CDAudio_Play ((byte)atoi (Cmd_Argv (2)), true);
+	}
+	else if (!Q_strcasecmp (command, "stop"))
+		CDAudio_Stop ();
+	else if (!Q_strcasecmp (command, "pause"))
+		CDAudio_Pause ();
+	else if (!Q_strcasecmp (command, "resume"))
+		CDAudio_Resume ();
+	else if (!Q_strcasecmp (command, "info"))
+	{
+		if (cd_playing)
+			Con_Printf ("Playing track %d%s%s\n", cd_curtrack,
+				cd_paused ? " (paused)" : "", cd_looping ? ", looping" : "");
+		else
+			Con_Printf ("Not playing a track.\n");
+	}
+	else
+		Con_Printf ("commands: play <track>, stop, pause, resume, info\n");
+}
+
 int CDAudio_Init (void)
 {
 	memset (&cd_track, 0, sizeof(cd_track));
 
 	if (COM_CheckParm ("-nocdaudio"))
 		cd_enabled = false;
+
+	Cmd_AddCommand ("cd", CD_f);
 
 	return 0;
 }

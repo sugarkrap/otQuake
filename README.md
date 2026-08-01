@@ -26,6 +26,18 @@ make                    # builds ./quake-fb and ./quake-fb-launcher
 make strip              # strip both binaries in place
 ```
 
+### Testing on your dev machine
+
+`make host` builds `./quake-host`, a native (non-ARM) build for quickly
+testing changes without cross-compiling and copying to real hardware. It
+reuses `vid_fb.c` as-is (harmless no-op if `/dev/fb0` isn't accessible —
+desktop Linux usually has a compositor holding the display already) but
+swaps the Zaurus's mmap'd OSS sound driver for a plain ALSA one
+(`src/snd_alsa.c`), since desktop Linux has neither `/dev/dsp` nor OSS mmap
+support. Run it from a directory containing `id1/` (game data + any
+converted `music/`); use the `cd` console command (`cd play 2`, `cd stop`,
+`cd info`, ...) to test CD music playback directly without loading a map.
+
 ## Music
 
 There's no CD drive, so CD tracks are emulated by streaming plain PCM
