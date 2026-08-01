@@ -37,6 +37,14 @@ cvar_t		scr_centertime = {"scr_centertime","2"};
 cvar_t		scr_showram = {"showram","1"};
 cvar_t		scr_showturtle = {"showturtle","0"};
 cvar_t		scr_showpause = {"showpause","1"};
+
+/*
+ * show_fps 1 draws a frame counter in the top right. Vanilla Quake has no
+ * such thing -- host_speeds exists, but it Con_Printfs every frame, which on
+ * this hardware perturbs the very number you are trying to read. This is the
+ * cheap version: count frames, update the string once a second.
+ */
+cvar_t		show_fps = {"show_fps","0",true};
 cvar_t		scr_printspeed = {"scr_printspeed","8"};
 
 qboolean	scr_initialized;		// ready to draw
@@ -382,6 +390,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showram);
 	Cvar_RegisterVariable (&scr_showturtle);
 	Cvar_RegisterVariable (&scr_showpause);
+	Cvar_RegisterVariable (&show_fps);
 	Cvar_RegisterVariable (&scr_centertime);
 	Cvar_RegisterVariable (&scr_printspeed);
 
@@ -462,6 +471,44 @@ void SCR_DrawNet (void)
 DrawPause
 ==============
 */
+/*
+==============
+SCR_DrawFPS
+
+Averaged over a one-second window rather than derived from the last frame:
+a per-frame reciprocal on a machine this slow is dominated by whichever
+frame happened to hit a surface cache miss, and jitters far too much to
+compare two video backends with.
+==============
+*/
+void SCR_DrawFPS (void)
+{
+	static double	last_time;
+	static int		frame_count;
+	static char		fps_text[16] = "0 fps";
+	double			now;
+
+	if (!show_fps.value)
+		return;
+
+	frame_count++;
+	now = realtime;
+
+	if (last_time == 0)			/* first call: start the window here */
+		last_time = now;
+
+	if (now - last_time >= 1.0)
+	{
+		sprintf (fps_text, "%d fps", (int)(frame_count / (now - last_time) + 0.5));
+		frame_count = 0;
+		last_time = now;
+	}
+
+	/* 8px character cells, so 8 per character wide plus a small margin. */
+	Draw_String (vid.width - (strlen(fps_text) * 8) - 8, 8, fps_text);
+}
+
+
 void SCR_DrawPause (void)
 {
 	qpic_t	*pic;
@@ -1009,6 +1056,7 @@ void SCR_UpdateScreen (void)
 #else
 		Sbar_Draw ();
 #endif
+		SCR_DrawFPS ();
 		SCR_DrawConsole ();
 		M_Draw ();
 	}

@@ -2,16 +2,20 @@
 Type=Application
 Name=Quake
 Comment=otQuake - framebuffer Quake
-# piko-quake-x11 renders into an X window, so the panel stays visible and
-# input arrives as X events -- nothing has to stop X. (piko-quake-x, which
-# does stop X to run the framebuffer build fullscreen, is still there for when
-# raw speed matters more than the desktop.)
+# The framebuffer build, fullscreen: piko-quake-x stops X, runs it on the
+# console with a real input grab, and lets inittab respawn the desktop on
+# exit. On this hardware that is the fastest thing available -- it writes
+# /dev/fb0 with a vblank page flip and nothing else touches the screen.
+#
+# piko-quake-x11 is the alternative and keeps the Matchbox panel visible, but
+# giving X the screen costs enough frame rate on a 400MHz PXA to not be the
+# default. Swap the Exec line to try it.
 #
 # Absolute path on purpose: matchbox-desktop is started from inittab, whose
 # PATH is /sbin:/usr/sbin:/bin:/usr/bin -- /etc/zaurus-card.sh is only sourced
 # by login shells, so a bare name would not resolve here. The script itself
 # reports a clear error when no card is inserted.
-Exec=/mnt/card/.zaurus/usr/bin/piko-quake-x11
+Exec=/mnt/card/.zaurus/usr/bin/piko-quake-x
 Icon=mbnoapp.png
 Terminal=false
 Categories=Games;
