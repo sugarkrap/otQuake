@@ -569,6 +569,14 @@ int main (int c, char **v)
 //	signal(SIGFPE, float32_ting_point_exception_handler);
 	signal(SIGFPE, SIG_IGN);
 
+	// Console output goes through putc(stdout). Redirected to a file or pipe
+	// that is block-buffered, so log lines appear in bursts thousands of
+	// characters late -- useless for watching a run in progress, and the
+	// final partial block is lost outright if the process is signalled.
+	// Line buffering costs one write() per console line (the render path
+	// prints nothing) and makes the log usable as a live progress source.
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	memset(&parms, 0, sizeof(parms));
 
 	COM_InitArgv(c, v);
