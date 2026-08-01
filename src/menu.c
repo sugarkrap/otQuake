@@ -3162,6 +3162,32 @@ void M_Keydown (int key)
 {
 	//Dan:
 	if (!bind_grab&&key==K_JOY1) key=K_ENTER;
+
+	/*
+	 * BACKSPACE also backs out of a menu.
+	 *
+	 * The Zaurus thumb keyboard has no Escape key -- the only way out of a
+	 * menu is the hardware Cancel button, which is easy to miss, and leaves
+	 * you stranded in a submenu if you do (found the hard way in the Load
+	 * menu). Backspace is right there and means "back" everywhere else on
+	 * the device.
+	 *
+	 * Excluded are the five menus that already use BACKSPACE for something:
+	 * m_setup, m_serialconfig, m_modemconfig and m_lanconfig edit text with
+	 * it, and m_keys deletes a binding. Nothing else in the menu system
+	 * looks at it, so this cannot shadow an existing action.
+	 *
+	 * bind_grab is checked too: while the Keys menu is waiting for a key to
+	 * bind, every key must reach it as itself.
+	 */
+	if (key == K_BACKSPACE && !bind_grab
+	    && m_state != m_setup
+	    && m_state != m_keys
+	    && m_state != m_serialconfig
+	    && m_state != m_modemconfig
+	    && m_state != m_lanconfig)
+		key = K_ESCAPE;
+
 	switch (m_state)
 	{
 	case m_none:
