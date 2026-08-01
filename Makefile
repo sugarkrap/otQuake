@@ -1,19 +1,21 @@
 # Makefile for handheldquake — ARMv5 Zaurus targets
 #
-# Toolchain: ARM EABI uClibc-ng, built by the dosbox-armv5-zaurus Buildroot.
-# Run the dosbox Buildroot first (scripts/02-build.sh in that repo) to
-# produce the toolchain at:
-#   ../dosbox-armv5-zaurus/buildroot/output/host/bin/
+# Toolchain: ARM EABI uClibc-ng, the crosstool-NG one from the sibling piko
+# repo at ../piko/toolchain/x-tools/. Build piko first if it is missing.
 #
-# Binaries are built as ARM EABI soft-float and linked statically for
-# portability across minimal rootfs images.
+# quake-fb is ARM EABI soft-float and linked statically, for portability
+# across minimal rootfs images. quake-x11 links dynamically -- see the X11
+# section below for why.
 #
 # Usage:
-#   make              → cross-compile for SL-C860
+#   make              → cross-compile quake-fb for SL-C860
+#   make x11          → cross-compile quake-x11 (runs under Matchbox)
+#   make host         → native build for testing sound on the dev machine
 #   make strip        → strip the binary in-place
 #   make clean        → remove obj/ and binary
 #   make extract      → (re)extract CVS source into src/
 #   make check-toolchain → verify the toolchain is present
+#   make check-x11    → verify piko's staged X11 headers are present
 
 # ── Toolchain ────────────────────────────────────────────────────────────────
 
@@ -44,7 +46,7 @@ OBJDIR := obj
 # Source list from original Makefile.in, with vid_qt.cpp replaced by vid_fb.c.
 SRCS := \
 	FixedPointMath.c \
-	cd_null.c     chase.c       cl_demo.c     cl_input.c    cl_main.c  \
+	cd_wav.c      chase.c       cl_demo.c     cl_input.c    cl_main.c  \
 	cl_parse.c    cl_tent.c     cmd.c         common.c      console.c  \
 	crc.c         cvar.c        d_edge.c      d_fill.c      d_init.c   \
 	d_modech.c    d_part.c      d_polyse.c    d_scan.c      d_sky.c    \
@@ -64,7 +66,25 @@ OBJS   := $(patsubst %.c,$(OBJDIR)/%.o,$(SRCS))
 TARGET    := quake-fb
 LAUNCHER  := quake-fb-launcher
 
-.PHONY: all clean extract strip strip-x11 check-toolchain check-x11 x11
+# ── Host test build ──────────────────────────────────────────────────────────
+#
+# Native build for the dev machine, so changes (e.g. CD music) can be heard
+# without cross-compiling and copying to real Zaurus hardware. Reuses
+# vid_fb.c as-is -- it silently no-ops if /dev/fb0 isn't accessible, which
+# is fine for testing sound -- but swaps snd_sun.c's mmap'd OSS driver for
+# a plain ALSA one (snd_alsa.c), since desktop Linux has neither /dev/dsp
+# nor OSS mmap support. Not used for the real device.
+HOST_CC      := gcc
+HOST_CFLAGS  := -std=gnu99 -O0 -g -fcommon -Wall -Wno-unused -Isrc
+HOST_LDFLAGS := -lm -lasound
+HOST_OBJDIR  := obj-host
+HOST_TARGET  := quake-host
+
+HOST_SRCS := $(filter-out snd_sun.c,$(SRCS)) snd_alsa.c
+HOST_OBJS := $(patsubst %.c,$(HOST_OBJDIR)/%.o,$(HOST_SRCS))
+
+.PHONY: all clean extract strip strip-x11 check-toolchain check-x11 x11 \
+        host clean-host
 
 all: $(SRCDIR)/vid_fb.c $(TARGET) $(LAUNCHER)
 
@@ -141,6 +161,21 @@ extract:
 clean:
 	rm -rf $(OBJDIR) $(X11_OBJDIR) $(TARGET) $(TARGET_X11) $(LAUNCHER)
 
+host: $(HOST_TARGET)
+
+$(HOST_TARGET): $(HOST_OBJS)
+	$(HOST_CC) -o $@ $^ $(HOST_LDFLAGS)
+	@echo "Built $@ ($(shell wc -c < $@) bytes, host)"
+
+$(HOST_OBJDIR)/%.o: $(SRCDIR)/%.c | $(HOST_OBJDIR)
+	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+
+$(HOST_OBJDIR):
+	mkdir -p $(HOST_OBJDIR)
+
+clean-host:
+	rm -rf $(HOST_OBJDIR) $(HOST_TARGET)
+
 check-toolchain:
 	@if [ -x "$(CC)" ]; then \
 		echo "Toolchain OK: $(CC)"; \
@@ -152,6 +187,6 @@ check-toolchain:
 		echo "(EABI flag present — correct)"; \
 	else \
 		echo "ERROR: toolchain not found at $(CROSS_PATH)/"; \
-		echo "Build the dosbox-armv5-zaurus Buildroot first."; \
+		echo "Build the piko toolchain first."; \
 		exit 1; \
 	fi

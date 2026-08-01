@@ -334,6 +334,9 @@ void S_PaintChannels(int endtime)
 															  
 		}
 
+	// mix in streamed background music, if a track is playing (cd_wav.c)
+		CDAudio_MixMusic (paintbuffer, end - paintedtime);
+
 	// transfer out according to DMA format
 		S_TransferPaintBuffer(end);
 		paintedtime = end;
