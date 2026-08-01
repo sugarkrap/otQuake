@@ -250,6 +250,10 @@ static void sig_handler(int sig)
 {
     (void)sig;
     fb_cleanup();
+    /* _exit() skips stdio cleanup, so anything still sitting in stdout's
+     * buffer is lost -- when stdout is a file or pipe rather than a tty that
+     * is the whole tail of the console log, including a `timedemo` result. */
+    fflush(stdout);
     _exit(0);
 }
 
