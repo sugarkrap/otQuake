@@ -19,6 +19,12 @@
 
 BIN=/mnt/card/.zaurus/usr/bin
 
+# Launched from the desktop we inherit DISPLAY from matchbox-desktop, but over
+# ssh there is none -- and "cannot open display" is a confusing way to find
+# that out. The session is always :0 on this device.
+: "${DISPLAY:=:0}"
+export DISPLAY
+
 if [ ! -x "$BIN/quake-x11" ]; then
 	echo "piko-quake-x11: no card at $BIN" >&2
 	exit 1

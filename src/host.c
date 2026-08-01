@@ -67,6 +67,15 @@ cvar_t	fraglimit = {"fraglimit","0",false,true};
 cvar_t	timelimit = {"timelimit","0",false,true};
 cvar_t	teamplay = {"teamplay","0",false,true};
 
+/*
+ * The progs.dat in this pak sets "campaign" continuously, and an unregistered
+ * cvar makes Cvar_Set print a warning every single time -- 6545 of them in one
+ * demo loop. That is not just console noise: each one is a Con_Printf, which
+ * on this hardware is time the renderer does not get. Registering it makes the
+ * sets land somewhere and the warnings stop.
+ */
+cvar_t	campaign = {"campaign","0"};
+
 cvar_t	samelevel = {"samelevel","0"};
 cvar_t	noexit = {"noexit","0",false,true};
 
@@ -226,6 +235,7 @@ void Host_InitLocal (void)
 	Cvar_RegisterVariable (&fraglimit);
 	Cvar_RegisterVariable (&timelimit);
 	Cvar_RegisterVariable (&teamplay);
+	Cvar_RegisterVariable (&campaign);
 	Cvar_RegisterVariable (&samelevel);
 	Cvar_RegisterVariable (&noexit);
 	Cvar_RegisterVariable (&skill);

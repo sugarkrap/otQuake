@@ -90,11 +90,11 @@ all: $(SRCDIR)/vid_fb.c $(TARGET) $(LAUNCHER)
 
 $(TARGET): $(OBJS)
 	$(CC) $(ARCHFLAGS) -o $@ $^ $(LDFLAGS)
-	@echo "Built $@ ($(shell wc -c < $@) bytes, EABI)"
+	@echo "Built $@ ($$(wc -c < $@) bytes, EABI)"
 
 $(LAUNCHER): $(SRCDIR)/quake-fb-launcher.c
 	$(CC) $(ARCHFLAGS) -std=gnu99 -O2 -static -o $@ $<
-	@echo "Built $@ ($(shell wc -c < $@) bytes, EABI)"
+	@echo "Built $@ ($$(wc -c < $@) bytes, EABI)"
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -148,12 +148,12 @@ check-x11:
 
 strip: $(TARGET) $(LAUNCHER)
 	$(STRIP) $(TARGET) $(LAUNCHER)
-	@echo "Stripped $(TARGET) ($(shell wc -c < $(TARGET)) bytes)"
-	@echo "Stripped $(LAUNCHER) ($(shell wc -c < $(LAUNCHER)) bytes)"
+	@echo "Stripped $(TARGET) ($$(wc -c < $(TARGET)) bytes)"
+	@echo "Stripped $(LAUNCHER) ($$(wc -c < $(LAUNCHER)) bytes)"
 
 strip-x11: $(TARGET_X11)
 	$(STRIP) $(TARGET_X11)
-	@echo "Stripped $(TARGET_X11) ($(shell wc -c < $(TARGET_X11)) bytes)"
+	@echo "Stripped $(TARGET_X11) ($$(wc -c < $(TARGET_X11)) bytes)"
 
 extract:
 	python3 extract-src.py
@@ -165,7 +165,7 @@ host: $(HOST_TARGET)
 
 $(HOST_TARGET): $(HOST_OBJS)
 	$(HOST_CC) -o $@ $^ $(HOST_LDFLAGS)
-	@echo "Built $@ ($(shell wc -c < $@) bytes, host)"
+	@echo "Built $@ ($$(wc -c < $@) bytes, host)"
 
 $(HOST_OBJDIR)/%.o: $(SRCDIR)/%.c | $(HOST_OBJDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<

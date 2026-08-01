@@ -152,6 +152,9 @@ static unsigned long x_pixel[256];
  */
 static int fast16;
 
+/* QUAKE_X11_DEBUG_KEYS=1: log every key event the server delivers. */
+static int debug_keys;
+
 /* ── X error trapping (for the MIT-SHM probe) ──────────────────────────── */
 
 static int shm_error;
@@ -202,6 +205,37 @@ void SetQtPalette(unsigned char *palette)
 
 /* ── keyboard mapping ───────────────────────────────────────────────────── */
 
+/*
+ * The d-pad, resolved by keycode rather than keysym.
+ *
+ * The running Xfbdev does not have the evdev keycode set loaded -- xkbcomp's
+ * live upload of zaurus.xkb is unreliable here (see piko's
+ * docs/DEADLETTER-XKB-LIVE-SETMAP.md), and the server falls back to the
+ * legacy XFree86 set, in which these keycodes mean something else entirely:
+ *
+ *   111  Up     -> Print          unmapped
+ *   113  Left   -> Alt_R          worse than unmapped: K_ALT is +strafe
+ *   114  Right  -> no keysym      unmapped
+ *   116  Down   -> Super_R        unmapped
+ *
+ * Going by keycode is not a workaround that some later keymap fix would
+ * invalidate: under the correct evdev keycodes these are <UP>, <LEFT>,
+ * <RGHT> and <DOWN> -- the kernel's KEY_UP/LEFT/RIGHT/DOWN plus the usual
+ * offset of 8 -- so the mapping is right either way. It takes precedence
+ * over the keysym lookup precisely because of the Left/Alt_R case, which a
+ * fallback-on-unmapped scheme would not catch.
+ */
+static int xkeycode_to_quake(unsigned int keycode)
+{
+    switch (keycode) {
+    case 111: return K_UPARROW;
+    case 113: return K_LEFTARROW;
+    case 114: return K_RIGHTARROW;
+    case 116: return K_DOWNARROW;
+    default:  return -1;
+    }
+}
+
 static int xkey_to_quake(KeySym ks)
 {
     switch (ks) {
@@ -246,8 +280,22 @@ static int xkey_to_quake(KeySym ks)
     case XK_KP_Next:      return K_PGDN;
     case XK_Pause:        return K_PAUSE;
 
+    /*
+     * The SL-C860's hardware buttons are wired to F-keys by the corgi
+     * keypad driver, and this thumb keyboard has no F-row of its own, so
+     * these are the buttons and nothing else:
+     *
+     *   F1 Calendar   F2 Address   F3 Fn    F4 Cancel
+     *   F10 Mail      F11 OK       F12 Menu  F7/F8 jog
+     *
+     * Cancel is the natural "get me out of here" button, so it becomes
+     * ESCAPE -- which opens the menu in game and backs out of it once
+     * there. vid_fb.c does the same thing for its equivalent button.
+     */
+    case XK_F4:  return K_ESCAPE;
+
     case XK_F1:  return K_F1;   case XK_F2:  return K_F2;
-    case XK_F3:  return K_F3;   case XK_F4:  return K_F4;
+    case XK_F3:  return K_F3;
     case XK_F5:  return K_F5;   case XK_F6:  return K_F6;
     case XK_F7:  return K_F7;   case XK_F8:  return K_F8;
     case XK_F9:  return K_F9;   case XK_F10: return K_F10;
@@ -405,6 +453,49 @@ static void create_image(void)
     }
 }
 
+/*
+ * Put the visible page back to 0 before we go away.
+ *
+ * This matters more than it looks. X only ever draws into page 0, so if we
+ * exit while page 1 is being displayed, the screen is frozen on our last
+ * frame forever: X carries on redrawing the desktop into a page nobody is
+ * looking at, and the machine appears hung when it is perfectly healthy.
+ *
+ * Written to be safe from a signal handler: only ioctl, no allocation, no
+ * stdio.
+ */
+static void restore_front_page(void)
+{
+    struct fb_var_screeninfo pan;
+
+    if (fbo_fd < 0 || fbo_front_page == 0)
+        return;
+
+    memset(&pan, 0, sizeof(pan));
+    if (ioctl(fbo_fd, FBIOGET_VSCREENINFO, &pan) == 0) {
+        pan.xoffset = 0;
+        pan.yoffset = 0;
+        ioctl(fbo_fd, FBIOPAN_DISPLAY, &pan);
+    }
+    fbo_front_page = 0;
+}
+
+/*
+ * Quake's own shutdown path runs KillQtApp, but a plain `kill` does not go
+ * anywhere near it -- and leaving the panel scanning out page 1 looks
+ * exactly like a frozen device. vid_fb.c installs handlers for the same
+ * reason (it has a VT mode to put back); this one has a page to put back.
+ *
+ * SIGKILL still cannot be caught, so it can still strand the display. The
+ * fix for that case is to restart X, which reprograms the mode.
+ */
+static void sig_handler(int sig)
+{
+    (void)sig;
+    restore_front_page();
+    _exit(0);
+}
+
 /* Current absolute position of our window, for the direct-fb blit. */
 static void update_window_origin(void)
 {
@@ -494,6 +585,12 @@ static void init_directfb(void)
 
     fbo_front_page = 0;
     fbo_active = 1;
+
+    /* Only now that a flip is possible is there anything to restore. */
+    signal(SIGINT,  sig_handler);
+    signal(SIGTERM, sig_handler);
+    signal(SIGHUP,  sig_handler);
+
     fprintf(stderr, "vid_x11: direct fb output, %dx%d %dbpp line=%d, "
             "page flip enabled\n", fbo_width, fbo_height, fbo_bpp, fbo_line_len);
     return;
@@ -528,6 +625,10 @@ void CreateQtWindow(void)
     x_depth  = DefaultDepth(x_dpy, x_screen);
 
     guess_render_size(&src_w, &src_h);
+
+    env = getenv("QUAKE_X11_DEBUG_KEYS");
+    if (env && *env && strcmp(env, "0") != 0)
+        debug_keys = 1;
 
     env = getenv("QUAKE_X11_SCALE");
     if (env && *env) {
@@ -613,22 +714,7 @@ void CreateQtWindow(void)
 void KillQtApp(void)
 {
     if (fbo_mem != MAP_FAILED) {
-        /*
-         * Leave the display on page 0. That is the page X has been drawing
-         * into all along, so the desktop is intact there -- walking away
-         * with page 1 on screen would freeze the panel at whatever we last
-         * copied into it.
-         */
-        if (fbo_fd >= 0 && fbo_front_page != 0) {
-            struct fb_var_screeninfo pan;
-
-            memset(&pan, 0, sizeof(pan));
-            if (ioctl(fbo_fd, FBIOGET_VSCREENINFO, &pan) == 0) {
-                pan.xoffset = 0;
-                pan.yoffset = 0;
-                ioctl(fbo_fd, FBIOPAN_DISPLAY, &pan);
-            }
-        }
+        restore_front_page();
         munmap(fbo_mem, (size_t)fbo_mem_size);
         fbo_mem = MAP_FAILED;
     }
@@ -967,7 +1053,22 @@ void ProcessOneQtEvent(void)
         case KeyPress:
         case KeyRelease:
             ks = XLookupKeysym(&ev.xkey, 0);
-            qk = xkey_to_quake(ks);
+            qk = xkeycode_to_quake(ev.xkey.keycode);
+            if (qk < 0)
+                qk = xkey_to_quake(ks);
+            /*
+             * QUAKE_X11_DEBUG_KEYS=1 reports every key the server actually
+             * delivers. Worth keeping: it distinguishes "the window manager
+             * swallowed that key" (nothing logged at all) from "we got it
+             * and did not recognise the keysym" (logged with qk -1), which
+             * are otherwise indistinguishable from the game's behaviour.
+             */
+            if (debug_keys)
+                fprintf(stderr, "vid_x11: key %s keycode=%u keysym=0x%lx (%s)"
+                        " -> quake %d\n",
+                        ev.type == KeyPress ? "down" : "up  ",
+                        ev.xkey.keycode, (unsigned long)ks,
+                        XKeysymToString(ks) ? XKeysymToString(ks) : "?", qk);
             if (qk >= 0)
                 Key_Event(qk, (qboolean)(ev.type == KeyPress));
             break;
@@ -991,15 +1092,26 @@ void ProcessOneQtEvent(void)
                 else
                     mouse_buttonstate &= ~(1 << bit);
             }
+
+            /*
+             * Pen down and pen up both start a fresh stroke. This is what
+             * makes touch look work: the touchscreen reports absolute
+             * positions and only while pressed, so without resetting here
+             * the first sample of a new stroke would be measured against
+             * wherever the previous one ended and fling the view across the
+             * map. Resetting means each stroke contributes only its own
+             * movement, and you can lift and drag again to keep turning
+             * past what one screen-width of travel would allow.
+             */
+            have_last = 0;
             break;
         }
 
         case MotionNotify:
             /*
-             * Relative movement since the last event. On a touchscreen this
-             * is absolute, so a fresh tap somewhere else arrives as one
-             * large jump -- hence have_last, which drops the delta across a
-             * pen-up/pen-down rather than spinning the view. Run with
+             * Accumulate movement relative to the previous sample of the
+             * SAME stroke; see the ButtonPress/Release handler for why
+             * have_last is cleared at each stroke boundary. Run with
              * -nomouse to ignore the pointer entirely.
              */
             if (have_last) {
