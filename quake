@@ -1,6 +1,17 @@
 #!/bin/sh
 # Binaries live on the card (/mnt/card/.zaurus/usr/bin, already on PATH via
-# /etc/zaurus-card.sh); game data is /mnt/card/id1. fbrun restores the console.
+# /etc/zaurus-card.sh); game data is /mnt/card/id1.
+#
+# matchbox-fbrun is what makes this safe to run from anywhere. Started from a
+# console it just runs the game and restores the console afterwards, however
+# the game exits. Started while the desktop is up it asks first, then stops
+# the graphical session so Quake can have the framebuffer and the input
+# devices to itself -- Xfbdev holds an EVIOCGRAB on the keyboard and
+# touchscreen, so a framebuffer build under X renders but never receives a
+# keystroke.
+#
+# Launching from the desktop icon does not go through this script: quake.desktop
+# is marked X-Piko-Heavy and matchbox-desktop applies the wrapper itself.
 BIN=/mnt/card/.zaurus/usr/bin
 [ -x "$BIN/quake-fb" ] || { echo "quake: no card at $BIN" >&2; exit 1; }
-QUAKE_BIN="$BIN/quake-fb" exec fbrun "$BIN/quake-fb-launcher" "$@"
+QUAKE_BIN="$BIN/quake-fb" exec matchbox-fbrun -n Quake -- "$BIN/quake-fb-launcher" "$@"

@@ -2,20 +2,25 @@
 Type=Application
 Name=Quake
 Comment=otQuake - framebuffer Quake
-# The framebuffer build, fullscreen: piko-quake-x stops X, runs it on the
-# console with a real input grab, and lets inittab respawn the desktop on
-# exit. On this hardware that is the fastest thing available -- it writes
-# /dev/fb0 with a vblank page flip and nothing else touches the screen.
-#
-# piko-quake-x11 is the alternative and keeps the Matchbox panel visible, but
-# giving X the screen costs enough frame rate on a 400MHz PXA to not be the
-# default. Swap the Exec line to try it.
+# The framebuffer build needs the whole machine: it writes /dev/fb0 directly
+# and reads the input devices, neither of which can be shared with Xfbdev.
+# X-Piko-Heavy tells matchbox-desktop to run it through matchbox-fbrun, which
+# asks first, stops the graphical session, and brings the desktop back on
+# exit. The Desktop Entry spec has no key for this and reserves the X- prefix
+# for exactly this kind of extension, so other implementations ignore it.
+X-Piko-Heavy=true
+X-Piko-Heavy-Reason=Quake needs the framebuffer and the input devices to itself.
 #
 # Absolute path on purpose: matchbox-desktop is started from inittab, whose
 # PATH is /sbin:/usr/sbin:/bin:/usr/bin -- /etc/zaurus-card.sh is only sourced
-# by login shells, so a bare name would not resolve here. The script itself
-# reports a clear error when no card is inserted.
-Exec=/mnt/card/.zaurus/usr/bin/piko-quake-x
+# by login shells, so a bare name would not resolve here.
+#
+# The quake script rather than quake-fb-launcher directly: the launcher
+# defaults to /usr/sbin/quake-fb, which no longer exists now that the binaries
+# live on the card, and the script is what points QUAKE_BIN at them. It calls
+# matchbox-fbrun too, which is harmless -- the wrapper detects it is already
+# inside one and just runs the game.
+Exec=/mnt/card/.zaurus/usr/bin/quake
 Icon=mbnoapp.png
 Terminal=false
 Categories=Games;

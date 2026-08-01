@@ -118,7 +118,7 @@ static int evkey_to_quake(unsigned int code)
     case KEY_F1:         return K_F1;
     case KEY_F2:         return K_F2;
     case KEY_F3:         return K_F3;
-    case KEY_F4:         return K_F4;
+    /* KEY_F4 is the Cancel button -- mapped to ESCAPE below. */
     case KEY_F5:         return K_F5;
     case KEY_F6:         return K_F6;
     case KEY_F7:         return K_F7;
@@ -128,7 +128,20 @@ static int evkey_to_quake(unsigned int code)
     case KEY_F11:        return K_F11;
     case KEY_F12:        return K_F12;
 
-    /* SL-C860 hardware buttons → function keys */
+    /*
+     * SL-C860 hardware buttons.
+     *
+     * The corgi keypad driver wires them to F-keys, and this thumb keyboard
+     * has no F-row of its own, so these codes are the buttons and nothing
+     * else: F1 Calendar, F2 Address, F3 Fn, F4 Cancel, F10 Mail, F11 OK,
+     * F12 Menu, F7/F8 the jog dial.
+     *
+     * Cancel therefore has to be ESCAPE -- it is the only way out of a menu
+     * on a keyboard with no Escape key, and without it you can walk into a
+     * submenu and be stuck there. vid_x11.c maps it the same way.
+     */
+    case KEY_F4:         return K_ESCAPE;
+
     case KEY_MENU:       return K_F1;
     case KEY_HOMEPAGE:   return K_F2;
     case KEY_BACK:       return K_ESCAPE;
