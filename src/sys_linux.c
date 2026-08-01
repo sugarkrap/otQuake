@@ -578,7 +578,12 @@ int main (int c, char **v)
 #ifdef GLQUAKE
 	parms.memsize = 16*1024*1024;
 #else
-	parms.memsize = 8*1024*1024;
+	// id's original default (8MB) was sized for mid-90s PCs; the SL-C860
+	// has 64MB of SDRAM and (for the fb target) no window system sharing
+	// it, so the whole hunk -- level data, sound, and the surface cache
+	// D_SurfaceCacheForRes() carves out of it -- can afford more room
+	// before it starts thrashing. -mem below still overrides this.
+	parms.memsize = 24*1024*1024;
 #endif
 
 	j = COM_CheckParm("-mem");

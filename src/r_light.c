@@ -166,6 +166,22 @@ void R_PushDlights (void)
 	{
 		if (l->die < cl.time || !l->radius)
 			continue;
+
+	// hard-fog cull: a light whose origin is already well past the fog
+	// distance can't illuminate anything still being drawn, so skip the
+	// (potentially expensive) BSP walk to mark surfaces for it
+		if (r_farclip2 > 0)
+		{
+			vec3_t	dist;
+			float	reach;
+
+			VectorSubtract (l->origin, r_origin, dist);
+			reach = r_farclip.value + l->radius;
+
+			if (DotProduct (dist, dist) > reach * reach)
+				continue;
+		}
+
 		R_MarkLights ( l, 1<<i, cl.worldmodel->nodes );
 	}
 }

@@ -166,6 +166,8 @@ cvar_t	r_speeds = {"r_speeds","0"};
 cvar_t	r_timegraph = {"r_timegraph","0"};
 cvar_t	r_graphheight = {"r_graphheight","10"};
 cvar_t	r_clearcolor = {"r_clearcolor","2"};
+cvar_t	r_farclip = {"r_farclip","2048"};	// hard distance cull ("fog"); 0 disables
+cvar_t	r_farclip_fx = {"r_farclip_fx","1024"};	// shorter cull for costly water/sky tiles; 0 disables
 cvar_t	r_waterwarp = {"r_waterwarp","1"};
 cvar_t	r_fullbright = {"r_fullbright","0"};
 cvar_t	r_drawentities = {"r_drawentities","1"};
@@ -247,6 +249,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
+	Cvar_RegisterVariable (&r_farclip);
+	Cvar_RegisterVariable (&r_farclip_fx);
 	Cvar_RegisterVariable (&r_waterwarp);
 	Cvar_RegisterVariable (&r_fullbright);
 	Cvar_RegisterVariable (&r_drawentities);
@@ -309,6 +313,8 @@ void R_InitFPM (void)
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
+	Cvar_RegisterVariable (&r_farclip);
+	Cvar_RegisterVariable (&r_farclip_fx);
 	Cvar_RegisterVariable (&r_waterwarp);
 	Cvar_RegisterVariable (&r_fullbright);
 	Cvar_RegisterVariable (&r_drawentities);
@@ -949,6 +955,14 @@ void R_DrawEntitiesOnList (void)
 		if (currententity == &cl_entities[cl.viewentity])
 			continue;	// don't draw the player
 
+		if (r_farclip2 > 0)
+		{
+			vec3_t	entdist;
+			VectorSubtract (currententity->origin, r_origin, entdist);
+			if (DotProduct (entdist, entdist) > r_farclip2)
+				continue;	// beyond the hard-fog distance
+		}
+
 		switch (currententity->model->type)
 		{
 		case mod_sprite:
@@ -1417,6 +1431,27 @@ void R_DrawBEntitiesOnList (void)
 			}
 
 			clipflags = R_BmodelCheckBBox (clmodel, minmaxs);
+
+		// hard-fog cull: treat brush entities (doors, plats, ...) beyond
+		// the fog distance the same as a bbox miss
+			if (clipflags != BMODEL_FULLY_CLIPPED && r_farclip2 > 0)
+			{
+				float	cx, cy, cz, dx, dy, dz;
+
+				cx = r_origin[0] < minmaxs[0] ? minmaxs[0] :
+					 (r_origin[0] > minmaxs[3] ? minmaxs[3] : r_origin[0]);
+				cy = r_origin[1] < minmaxs[1] ? minmaxs[1] :
+					 (r_origin[1] > minmaxs[4] ? minmaxs[4] : r_origin[1]);
+				cz = r_origin[2] < minmaxs[2] ? minmaxs[2] :
+					 (r_origin[2] > minmaxs[5] ? minmaxs[5] : r_origin[2]);
+
+				dx = cx - r_origin[0];
+				dy = cy - r_origin[1];
+				dz = cz - r_origin[2];
+
+				if (dx*dx + dy*dy + dz*dz > r_farclip2)
+					clipflags = BMODEL_FULLY_CLIPPED;
+			}
 
 			if (clipflags != BMODEL_FULLY_CLIPPED)
 			{
