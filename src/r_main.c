@@ -166,6 +166,7 @@ cvar_t	r_speeds = {"r_speeds","0"};
 cvar_t	r_timegraph = {"r_timegraph","0"};
 cvar_t	r_graphheight = {"r_graphheight","10"};
 cvar_t	r_clearcolor = {"r_clearcolor","2"};
+cvar_t	r_farclip = {"r_farclip","2048"};	// hard distance cull ("fog"); 0 disables
 cvar_t	r_waterwarp = {"r_waterwarp","1"};
 cvar_t	r_fullbright = {"r_fullbright","0"};
 cvar_t	r_drawentities = {"r_drawentities","1"};
@@ -247,6 +248,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
+	Cvar_RegisterVariable (&r_farclip);
 	Cvar_RegisterVariable (&r_waterwarp);
 	Cvar_RegisterVariable (&r_fullbright);
 	Cvar_RegisterVariable (&r_drawentities);
@@ -309,6 +311,7 @@ void R_InitFPM (void)
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_ambient);
 	Cvar_RegisterVariable (&r_clearcolor);
+	Cvar_RegisterVariable (&r_farclip);
 	Cvar_RegisterVariable (&r_waterwarp);
 	Cvar_RegisterVariable (&r_fullbright);
 	Cvar_RegisterVariable (&r_drawentities);
@@ -948,6 +951,14 @@ void R_DrawEntitiesOnList (void)
 
 		if (currententity == &cl_entities[cl.viewentity])
 			continue;	// don't draw the player
+
+		if (r_farclip2 > 0)
+		{
+			vec3_t	entdist;
+			VectorSubtract (currententity->origin, r_origin, entdist);
+			if (DotProduct (entdist, entdist) > r_farclip2)
+				continue;	// beyond the hard-fog distance
+		}
 
 		switch (currententity->model->type)
 		{

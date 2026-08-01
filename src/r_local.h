@@ -74,6 +74,8 @@ extern cvar_t	r_speeds;
 extern cvar_t	r_timegraph;
 extern cvar_t	r_graphheight;
 extern cvar_t	r_clearcolor;
+extern cvar_t	r_farclip;
+extern float	r_farclip2;		// squared hard-fog distance; <= 0 disables
 extern cvar_t	r_waterwarp;
 extern cvar_t	r_fullbright;
 extern cvar_t	r_drawentities;
