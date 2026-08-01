@@ -376,7 +376,7 @@ void D_DrawSpans8 (espan_t *pspan)
 		tdivz = tdivzorig + pspan->v * tdivzstepv + pspan->u * tdivzstepu;
 		zi = d_ziorigin_fxp + pspan->v * d_zistepv_fxp + pspan->u * d_zistepu_fxp;
 		if (zi == 0) zi = 1;
-//#define USE_JR_OPT1
+// USE_JR_OPT1 defined in quakedef.h
 #ifdef USE_JR_OPT1
 		iz = iztable[ ( zi >> 8 ) & 0xFFFF ];
 		s1 = (((sdivz * iz) >> 8) & 0xFFFFFF00) + sadjust;

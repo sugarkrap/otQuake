@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //#define USE_PQ_OPT3	//In progress, don't use.
 #define USE_PQ_OPT4		//Uses the fixed point D_PolysetCalcGradients function.
 #define USE_PQ_OPT5		//Uses the fixed point D_DrawSpans8 (partially from Jacco Biker)
+#define USE_JR_OPT1		//Replaces the /zi divide inside USE_PQ_OPT5 with an iztable[] reciprocal lookup + multiply (no hardware divide on ARMv5TE)
 
 #define MIN_VID_HEIGHT 180
 
