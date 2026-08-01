@@ -1,0 +1,42 @@
+#!/bin/sh
+# piko-quake-x11 -- launch the X11 build on the piko rootfs.
+#
+# quake-x11 renders into an X window, so it coexists with Matchbox: the panel
+# stays visible and input arrives as X events, with none of the evdev grab
+# fighting that fullscreen framebuffer Quake runs into under X.
+#
+# QUAKE_X11_DIRECTFB=1 is what makes it fast enough to be worth using. The
+# portable path (XShm) costs a second full-frame copy inside the X server and
+# tears, because Xfbdev writes straight into the buffer being scanned out.
+# The direct path writes the window's rectangle of /dev/fb0 itself and page
+# flips on a vblank edge -- no extra copy, no tearing. It needs a driver that
+# can pan (w100fb here), and falls back to XShm on its own if that is missing,
+# which is why this is the piko-specific launcher and not a general one.
+#
+# 320x224 rendered, doubled to a 640x448 window: quarter-resolution
+# rasterising is what keeps the frame rate up on a 400MHz PXA with no FPU,
+# and 480-32 leaves exactly the panel strip uncovered.
+
+BIN=/mnt/card/.zaurus/usr/bin
+
+if [ ! -x "$BIN/quake-x11" ]; then
+	echo "piko-quake-x11: no card at $BIN" >&2
+	exit 1
+fi
+
+# Two instances would both page flip and both drive /dev/fb0, which makes the
+# screen unusable -- and a stray double tap on the desktop icon is an easy way
+# to get there. busybox here has no pidof/pgrep, hence the /proc walk.
+for p in /proc/[0-9]*; do
+	[ -r "$p/cmdline" ] || continue
+	c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+	case "$c" in
+	*/quake-x11\ *|*/quake-x11)
+		echo "piko-quake-x11: already running (pid ${p#/proc/})" >&2
+		exit 0
+		;;
+	esac
+done
+
+exec env QUAKE_X11_DIRECTFB=1 "$BIN/quake-x11" \
+	-nosound -basedir /mnt/card -winsize 320 224 "$@"
