@@ -42,7 +42,7 @@ OBJDIR := obj
 # Source list from original Makefile.in, with vid_qt.cpp replaced by vid_fb.c.
 SRCS := \
 	FixedPointMath.c \
-	cd_null.c     chase.c       cl_demo.c     cl_input.c    cl_main.c  \
+	cd_wav.c      chase.c       cl_demo.c     cl_input.c    cl_main.c  \
 	cl_parse.c    cl_tent.c     cmd.c         common.c      console.c  \
 	crc.c         cvar.c        d_edge.c      d_fill.c      d_init.c   \
 	d_modech.c    d_part.c      d_polyse.c    d_scan.c      d_sky.c    \
@@ -62,7 +62,24 @@ OBJS   := $(patsubst %.c,$(OBJDIR)/%.o,$(SRCS))
 TARGET    := quake-fb
 LAUNCHER  := quake-fb-launcher
 
-.PHONY: all clean extract strip check-toolchain
+# ── Host test build ──────────────────────────────────────────────────────────
+#
+# Native build for the dev machine, so changes (e.g. CD music) can be heard
+# without cross-compiling and copying to real Zaurus hardware. Reuses
+# vid_fb.c as-is -- it silently no-ops if /dev/fb0 isn't accessible, which
+# is fine for testing sound -- but swaps snd_sun.c's mmap'd OSS driver for
+# a plain ALSA one (snd_alsa.c), since desktop Linux has neither /dev/dsp
+# nor OSS mmap support. Not used for the real device.
+HOST_CC      := gcc
+HOST_CFLAGS  := -std=gnu99 -O0 -g -fcommon -Wall -Wno-unused -Isrc
+HOST_LDFLAGS := -lm -lasound
+HOST_OBJDIR  := obj-host
+HOST_TARGET  := quake-host
+
+HOST_SRCS := $(filter-out snd_sun.c,$(SRCS)) snd_alsa.c
+HOST_OBJS := $(patsubst %.c,$(HOST_OBJDIR)/%.o,$(HOST_SRCS))
+
+.PHONY: all clean extract strip check-toolchain host clean-host
 
 all: $(SRCDIR)/vid_fb.c $(TARGET) $(LAUNCHER)
 
@@ -90,6 +107,21 @@ extract:
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(LAUNCHER)
+
+host: $(HOST_TARGET)
+
+$(HOST_TARGET): $(HOST_OBJS)
+	$(HOST_CC) -o $@ $^ $(HOST_LDFLAGS)
+	@echo "Built $@ ($(shell wc -c < $@) bytes, host)"
+
+$(HOST_OBJDIR)/%.o: $(SRCDIR)/%.c | $(HOST_OBJDIR)
+	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+
+$(HOST_OBJDIR):
+	mkdir -p $(HOST_OBJDIR)
+
+clean-host:
+	rm -rf $(HOST_OBJDIR) $(HOST_TARGET)
 
 check-toolchain:
 	@if [ -x "$(CC)" ]; then \
