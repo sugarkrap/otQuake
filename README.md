@@ -26,6 +26,22 @@ make                    # builds ./quake-fb and ./quake-fb-launcher
 make strip              # strip both binaries in place
 ```
 
+## Music
+
+There's no CD drive, so CD tracks are emulated by streaming plain PCM
+`music/trackNN.wav` files (see `src/cd_wav.c`) straight into the same mixer
+the sound effects use. There's no decoder or resampler — this hardware has
+no FPU — so tracks must already be 16-bit PCM at the exact rate/channels
+`quake-fb` negotiates with `/dev/dsp` (11025 Hz stereo by default; see
+`tryrates[]` in `src/snd_sun.c`, or `-sndspeed`/`-sndmono`/`-sndstereo`).
+
+`convert-music.sh` converts a folder of Quake's original `trackNN.ogg`
+files (or a mod's own music folder) to matching `.wav` files with ffmpeg:
+
+```sh
+./convert-music.sh /path/to/extracted/id1/music id1/music
+```
+
 ## Screenshots
 
 Coming soon.
