@@ -96,8 +96,16 @@ $(LAUNCHER): $(SRCDIR)/quake-fb-launcher.c
 	$(CC) $(ARCHFLAGS) -std=gnu99 -O2 -static -o $@ $<
 	@echo "Built $@ ($$(wc -c < $@) bytes, EABI)"
 
+# -MMD -MP emits a .d per object listing the headers it used, so editing a
+# header rebuilds every .c that includes it. Without this, a header change
+# recompiled only the .c files that were themselves edited and silently linked
+# them against objects built from the previous header -- e.g. an enum gaining a
+# member shifts later members' values in freshly built objects only, and the
+# stale ones then index the same arrays differently.
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+
+-include $(wildcard $(OBJDIR)/*.d)
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)

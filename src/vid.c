@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern void CreateQtWindow(void);
 extern void KillQtApp(void);
 extern void RepaintQtWindow(void);
+extern void RepaintQtWindowRect(int x, int y, int w, int h);
 extern void DoQtEventLoop(void);
 extern void ProcessOneQtEvent(void);
 extern void SetQtPalette(unsigned char *palette);
@@ -190,7 +191,16 @@ void VID_SetPalette(unsigned char *p) { SetQtPalette(p); }
 // Called at shutdown
 void VID_Shutdown(void) { KillQtApp(); }
 // flushes the given rectangles from the view buffer to the screen
-void VID_Update(vrect_t *rects) { RepaintQtWindow(); }
+/* Quake hands us the rectangle that actually changed; vid_fb uses it to skip
+ * repainting untouched scanlines (the blit is ~60% of the frame on the
+ * SL-C860). A NULL/empty list means "everything". */
+void VID_Update(vrect_t *rects)
+{
+    if (rects)
+        RepaintQtWindowRect (rects->x, rects->y, rects->width, rects->height);
+    else
+        RepaintQtWindow();
+}
 void VID_DitherOn(void) { }
 void VID_DitherOff(void) { }
 int Sys_OpenWindow(void) { return 0; }

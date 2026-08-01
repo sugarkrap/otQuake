@@ -233,6 +233,7 @@ void R_PrintDSpeeds (void)
 double	r_prof_acc[PROF_COUNT];
 int		r_prof_frames;
 int		r_prof_surfs;
+int		r_prof_blit_rows;
 int		r_prof_active;
 
 static char *r_prof_names[PROF_COUNT] = {
@@ -246,6 +247,8 @@ static char *r_prof_names[PROF_COUNT] = {
 	"  ` span texturing",
 	"  ` z spans",
 	"blit to /dev/fb0",
+	"  ` blit: pixel loop",
+	"  ` blit: pan ioctl",
 	"FRAME TOTAL"
 };
 
@@ -262,6 +265,7 @@ void R_ProfReset (void)
 		r_prof_acc[i] = 0.0;
 	r_prof_frames = 0;
 	r_prof_surfs = 0;
+	r_prof_blit_rows = 0;
 }
 
 /*
@@ -296,6 +300,10 @@ void R_ProfReport (void)
 	}
 	Con_Printf ("surfaces drawn: %.1f per frame\n",
 				(double)r_prof_surfs / r_prof_frames);
+	Con_Printf ("blit scanlines: %.1f of %d per frame (%.0f%% of full)\n",
+				(double)r_prof_blit_rows / r_prof_frames, (int)vid.height,
+				vid.height ? (100.0 * r_prof_blit_rows)
+							 / ((double)r_prof_frames * vid.height) : 0.0);
 	Con_Printf ("---- end r_profile ----\n");
 }
 

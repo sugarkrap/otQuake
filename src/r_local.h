@@ -105,6 +105,8 @@ typedef enum {
 	PROF_SURF_SPAN,	// (*d_drawspans) / Turbulent8 / sky -- the texture mapper
 	PROF_SURF_ZSPAN,// D_DrawZSpans
 	PROF_BLIT,		// VID_Update: palette lookup + 2x doubling into /dev/fb0
+	PROF_BLIT_PIX,	// ` the pixel loop alone (uncached stores)
+	PROF_BLIT_PAN,	// ` FBIOPAN_DISPLAY -- may block until vblank
 	PROF_FRAME,		// whole R_RenderView_
 	PROF_COUNT
 } r_profbucket_t;
@@ -113,6 +115,7 @@ extern cvar_t	r_profile;
 extern double	r_prof_acc[PROF_COUNT];
 extern int		r_prof_frames;
 extern int		r_prof_surfs;
+extern int		r_prof_blit_rows;	// source scanlines actually blitted
 extern int		r_prof_active;	// cached: r_profile.value != 0
 
 void R_ProfReset (void);
