@@ -85,16 +85,60 @@ static unsigned int *blit_row = NULL;
 static int blit_row_words = 0;
 
 /*
- * Partial-update state. Quake tells us which rectangle actually changed, but
- * with page flipping the page we are about to draw was last written TWO
- * frames ago, so it is stale wherever either of the last two frames changed
- * -- hence the union with the previous frame's rect. The countdown forces
- * whole-screen blits after init or a palette change, when neither page holds
- * anything valid at all.
+ * Per-page shadow of what each framebuffer page currently displays, in the
+ * engine's own 8-bit indexed form.
+ *
+ * This replaces an earlier "union of this frame's and last frame's dirty
+ * rect" scheme, which existed only because under page flipping the page
+ * about to be drawn was last written two frames ago. A shadow answers that
+ * question exactly rather than conservatively, and answers it per scanline
+ * rather than per rectangle.
+ *
+ * Worth it because the blit is ~56% of the frame and every byte of it is an
+ * uncached write, while comparing against the shadow is a cached read of one
+ * byte per pixel. Trading ~75 KB of cached reads against up to ~600 KB of
+ * uncached writes pays off whenever any part of the screen is unchanged.
+ *
+ * Indexed by page; page 1 is unused when not page flipping.
  */
-static int blit_full_countdown = 2;
-static int blit_prev_valid = 0;
-static int blit_prev_x = 0, blit_prev_y = 0, blit_prev_w = 0, blit_prev_h = 0;
+static unsigned char *blit_shadow[2];
+static int blit_shadow_valid[2];
+static int blit_shadow_w, blit_shadow_h;
+
+static void blit_shadow_invalidate(void)
+{
+    blit_shadow_valid[0] = blit_shadow_valid[1] = 0;
+}
+
+/*
+ * Allocate/resize the shadows. Returns 0 if unavailable, in which case the
+ * caller just blits everything -- the shadow is an optimisation, never a
+ * correctness requirement.
+ */
+static int blit_shadow_ready(int w, int h)
+{
+    int i;
+
+    if (blit_shadow[0] && blit_shadow_w == w && blit_shadow_h == h)
+        return 1;
+
+    for (i = 0; i < 2; i++) {
+        free(blit_shadow[i]);
+        blit_shadow[i] = (unsigned char *)malloc((size_t)w * h);
+        if (!blit_shadow[i]) {
+            free(blit_shadow[0]);
+            free(blit_shadow[1]);
+            blit_shadow[0] = blit_shadow[1] = NULL;
+            blit_shadow_w = blit_shadow_h = 0;
+            blit_shadow_invalidate();
+            return 0;
+        }
+    }
+    blit_shadow_w = w;
+    blit_shadow_h = h;
+    blit_shadow_invalidate();
+    return 1;
+}
 
 /* pre-built 8-bit index → RGB565 palette */
 static unsigned short palette16[256];
@@ -404,9 +448,10 @@ void SetQtPalette(unsigned char *palette)
 {
     int i;
 
-    /* Every pixel already on screen was built from the old palette, so both
-     * pages are invalid: force whole-screen blits again. */
-    blit_full_countdown = 2;
+    /* Every pixel already on screen was built from the old palette, so the
+     * shadows no longer describe what the pages actually show, even where the
+     * indices are unchanged. Force a full repaint of both. */
+    blit_shadow_invalidate();
 
     for (i = 0; i < 256; i++) {
         unsigned int r = palette[i * 3 + 0];
@@ -444,29 +489,15 @@ void RepaintQtWindowRect(int rx, int ry, int rw, int rh)
     if (rw <= 0 || rh <= 0)
         return;
 
-    cx = rx; cy = ry; cw = rw; ch = rh;
-
-    if (blit_full_countdown > 0) {
-        cx = 0; cy = 0; cw = (int)vid.width; ch = (int)vid.height;
-        blit_full_countdown--;
-    } else if (fb_pageflip_active && blit_prev_valid) {
-        /* union with the previous frame's rect -- see note above */
-        int x0 = cx < blit_prev_x ? cx : blit_prev_x;
-        int y0 = cy < blit_prev_y ? cy : blit_prev_y;
-        int x1 = (cx + cw) > (blit_prev_x + blit_prev_w)
-                 ? (cx + cw) : (blit_prev_x + blit_prev_w);
-        int y1 = (cy + ch) > (blit_prev_y + blit_prev_h)
-                 ? (cy + ch) : (blit_prev_y + blit_prev_h);
-        cx = x0; cy = y0; cw = x1 - x0; ch = y1 - y0;
-    } else if (fb_pageflip_active) {
-        cx = 0; cy = 0; cw = (int)vid.width; ch = (int)vid.height;
-    }
-
-    blit_prev_x = rx; blit_prev_y = ry;
-    blit_prev_w = rw; blit_prev_h = rh;
-    blit_prev_valid = 1;
-
-    r_prof_blit_rows += ch;
+    /*
+     * The caller's rect is only a hint now. The shadow knows exactly what the
+     * target page contains, so scanning the whole buffer both catches
+     * anything the engine changed without declaring it and, more importantly,
+     * skips unchanged scanlines *inside* the declared rect -- which the rect
+     * alone could never do.
+     */
+    (void)rx; (void)ry; (void)rw; (void)rh;
+    cx = 0; cy = 0; cw = (int)vid.width; ch = (int)vid.height;
 
     if (fb_pageflip_active) {
         /* Always draw into the currently invisible page. */
@@ -499,23 +530,58 @@ void RepaintQtWindowRect(int rx, int ry, int rw, int rh)
          * pixels), and each source row is emitted to two adjacent fb rows.
          */
         int y, x;
-        int bytes = cw * (int)sizeof(unsigned int);
+        int page = fb_pageflip_active ? fb_back_page : 0;
+        unsigned char *shadow = NULL;
+        int use_shadow = 0;
+
+        if (blit_shadow_ready (cw, ch)) {
+            shadow = blit_shadow[page];
+            use_shadow = blit_shadow_valid[page];
+        }
 
         for (y = cy; y < cy + ch; y++) {
             const unsigned char *srow = src + y * rb + cx;
-            unsigned char *d0 = dst_base + (y * 2)     * fb_line_len
-                                + cx * (int)sizeof(unsigned int);
-            unsigned char *d1 = d0 + fb_line_len;
+            unsigned char *shrow = shadow ? shadow + (size_t)y * cw : NULL;
+            unsigned char *d0, *d1;
+            int x0 = 0, x1 = cw - 1;
+            int span;
 
-            for (x = 0; x < cw; x++) {
-                unsigned int cc = (unsigned int)palette16[srow[x]];
+            if (use_shadow) {
+                /* Unchanged scanline: the page already shows this. */
+                if (!memcmp (srow, shrow, (size_t)cw))
+                    continue;
+                /* Narrow to the changed span. memcmp said they differ, so
+                 * the two scans below are guaranteed to meet. */
+                while (srow[x0] == shrow[x0])
+                    x0++;
+                while (srow[x1] == shrow[x1])
+                    x1--;
+            }
+
+            span = x1 - x0 + 1;
+
+            d0 = dst_base + (y * 2) * fb_line_len
+                 + (cx + x0) * (int)sizeof(unsigned int);
+            d1 = d0 + fb_line_len;
+
+            for (x = 0; x < span; x++) {
+                unsigned int cc = (unsigned int)palette16[srow[x0 + x]];
                 blit_row[x] = cc | (cc << 16);
             }
             /* cached -> uncached in bursts, twice (the doubled scanline) */
-            memcpy (d0, blit_row, bytes);
-            memcpy (d1, blit_row, bytes);
+            memcpy (d0, blit_row, (size_t)span * sizeof(unsigned int));
+            memcpy (d1, blit_row, (size_t)span * sizeof(unsigned int));
+
+            if (shrow)
+                memcpy (shrow + x0, srow + x0, (size_t)span);
+
+            r_prof_blit_rows++;
         }
+
+        if (shadow)
+            blit_shadow_valid[page] = 1;
     } else {
+        r_prof_blit_rows += ch;
         /* Fallback: 1:1 blit, black borders if render < physical */
         int sw = vid.width, sh = vid.height;
         int bw = sw < fb_width  ? sw : fb_width;
