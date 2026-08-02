@@ -230,6 +230,84 @@ void R_PrintDSpeeds (void)
 }
 
 
+double	r_prof_acc[PROF_COUNT];
+int		r_prof_frames;
+int		r_prof_surfs;
+int		r_prof_blit_rows;
+int		r_prof_active;
+
+static char *r_prof_names[PROF_COUNT] = {
+	"world (bsp walk + edges)",
+	"bmodels",
+	"scan edges  [total]",
+	"entities (alias models)",
+	"view model",
+	"particles",
+	"  ` surface cache build",
+	"  ` span texturing",
+	"  ` z spans",
+	"blit to /dev/fb0",
+	"  ` blit: pixel loop",
+	"  ` blit: pan ioctl",
+	"FRAME TOTAL"
+};
+
+/*
+=============
+R_ProfReset
+=============
+*/
+void R_ProfReset (void)
+{
+	int	i;
+
+	for (i = 0 ; i < PROF_COUNT ; i++)
+		r_prof_acc[i] = 0.0;
+	r_prof_frames = 0;
+	r_prof_surfs = 0;
+	r_prof_blit_rows = 0;
+}
+
+/*
+=============
+R_ProfReport
+
+Dumps accumulated per-phase totals. Percentages are against the measured
+frame total, not wall clock, so anything the renderer does not account for
+(demo parsing, server frame, sound) simply does not appear here.
+=============
+*/
+void R_ProfReport (void)
+{
+	int		i;
+	double	total, ms_per_frame;
+
+	if (!r_prof_frames)
+	{
+		Con_Printf ("r_profile: no frames recorded\n");
+		return;
+	}
+
+	total = r_prof_acc[PROF_FRAME];
+
+	Con_Printf ("\n---- r_profile: %d frames ----\n", r_prof_frames);
+	for (i = 0 ; i < PROF_COUNT ; i++)
+	{
+		ms_per_frame = (r_prof_acc[i] * 1000.0) / r_prof_frames;
+		Con_Printf ("%-26s %8.2f ms/f  %5.1f%%\n",
+					r_prof_names[i], ms_per_frame,
+					total > 0.0 ? (r_prof_acc[i] * 100.0 / total) : 0.0);
+	}
+	Con_Printf ("surfaces drawn: %.1f per frame\n",
+				(double)r_prof_surfs / r_prof_frames);
+	Con_Printf ("blit scanlines: %.1f of %d per frame (%.0f%% of full)\n",
+				(double)r_prof_blit_rows / r_prof_frames, (int)vid.height,
+				vid.height ? (100.0 * r_prof_blit_rows)
+							 / ((double)r_prof_frames * vid.height) : 0.0);
+	Con_Printf ("---- end r_profile ----\n");
+}
+
+
 /*
 =============
 R_PrintAliasStats

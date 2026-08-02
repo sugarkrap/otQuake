@@ -459,6 +459,8 @@ void CL_FinishTimeDemo (void)
 		time = 1;
 	Con_Printf ("%i frames %5.1f seconds %5.1f fps\n", frames, time, frames/time);
 
+	R_ProfReport ();	// no-op unless r_profile is set
+
 #ifdef _X86_
 	//Dan East:
 	//The following generates Floating Point totals if floating point logging was performed
@@ -503,5 +505,7 @@ void CL_TimeDemo_f (void)
 	cls.timedemo = true;
 	cls.td_startframe = host_framecount;
 	cls.td_lastframe = -1;		// get a new message this frame
+
+	R_ProfReset ();		// r_profile totals cover exactly the timed run
 }
 

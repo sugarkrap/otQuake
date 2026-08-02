@@ -26,6 +26,7 @@
 #include <linux/kd.h>
 
 #include "quakedef.h"  /* pulls in keys.h, vid.h, etc. */
+#include "r_local.h"   /* r_profile buckets: split the blit cost */
 
 /* ── framebuffer state ─────────────────────────────────────────────────── */
 
@@ -68,6 +69,32 @@ static int tty_in_graphics_mode = 0;
 static int fb_pageflip_active = 0;
 static int fb_back_page = 1;      /* page index we draw into next */
 static int fb_page_bytes = 0;     /* line_len * height, i.e. one page */
+
+/*
+ * One doubled output row, in ordinary cached memory.
+ *
+ * Profiling (r_profile) put 60% of the frame in this blit and only 0.15% in
+ * the page-flip ioctl, so the cost is the stores themselves: the old loop
+ * issued two single-word writes per source pixel straight at the uncached
+ * framebuffer (~154k of them per frame), and an uncached STR is a separate
+ * bus transaction that cannot be coalesced. Building the row in cached
+ * memory first and then memcpy'ing it lets libc use LDM/STM, so the same
+ * bytes leave as multi-word bursts.
+ */
+static unsigned int *blit_row = NULL;
+static int blit_row_words = 0;
+
+/*
+ * Partial-update state. Quake tells us which rectangle actually changed, but
+ * with page flipping the page we are about to draw was last written TWO
+ * frames ago, so it is stale wherever either of the last two frames changed
+ * -- hence the union with the previous frame's rect. The countdown forces
+ * whole-screen blits after init or a palette change, when neither page holds
+ * anything valid at all.
+ */
+static int blit_full_countdown = 2;
+static int blit_prev_valid = 0;
+static int blit_prev_x = 0, blit_prev_y = 0, blit_prev_w = 0, blit_prev_h = 0;
 
 /* pre-built 8-bit index → RGB565 palette */
 static unsigned short palette16[256];
@@ -250,6 +277,10 @@ static void sig_handler(int sig)
 {
     (void)sig;
     fb_cleanup();
+    /* _exit() skips stdio cleanup, so anything still sitting in stdout's
+     * buffer is lost -- when stdout is a file or pipe rather than a tty that
+     * is the whole tail of the console log, including a `timedemo` result. */
+    fflush(stdout);
     _exit(0);
 }
 
@@ -329,6 +360,16 @@ void CreateQtWindow(void)
 
     memset(fb_mem, 0, (size_t)fb_mem_size);
     tty_graphics_mode();
+
+    /* One doubled output row of cached scratch for the burst blit. Sized
+     * from the physical width so it covers the widest row we can emit. */
+    blit_row_words = fb_width;      /* generous: 2x path needs fb_width/2 */
+    blit_row = (unsigned int *)malloc((size_t)blit_row_words * sizeof(unsigned int));
+    if (!blit_row) {
+        fprintf(stderr, "vid_fb: out of memory for blit scratch row\n");
+        blit_row_words = 0;
+    }
+
     fprintf(stderr, "vid_fb: %dx%d %dbpp line=%d\n",
             fb_width, fb_height, fb_bpp, fb_line_len);
     if (fb_pageflip_active) {
@@ -362,6 +403,11 @@ void KillQtApp(void)
 void SetQtPalette(unsigned char *palette)
 {
     int i;
+
+    /* Every pixel already on screen was built from the old palette, so both
+     * pages are invalid: force whole-screen blits again. */
+    blit_full_countdown = 2;
+
     for (i = 0; i < 256; i++) {
         unsigned int r = palette[i * 3 + 0];
         unsigned int g = palette[i * 3 + 1];
@@ -373,17 +419,54 @@ void SetQtPalette(unsigned char *palette)
     }
 }
 
-void RepaintQtWindow(void)
+void RepaintQtWindowRect(int rx, int ry, int rw, int rh)
 {
     const unsigned char *src;
     int rb;
     unsigned char *dst_base;
+    int cx, cy, cw, ch;
 
     if (fb_mem == MAP_FAILED || fb_bpp != 16)
         return;
 
     src = (const unsigned char *)vid.buffer;
     rb  = vid.rowbytes;
+
+    PROF_T0 (t_pix);
+
+    /* clamp the caller's rect to the render buffer */
+    if (rw <= 0 || rh <= 0)
+        return;
+    if (rx < 0) { rw += rx; rx = 0; }
+    if (ry < 0) { rh += ry; ry = 0; }
+    if (rx + rw > (int)vid.width)  rw = (int)vid.width  - rx;
+    if (ry + rh > (int)vid.height) rh = (int)vid.height - ry;
+    if (rw <= 0 || rh <= 0)
+        return;
+
+    cx = rx; cy = ry; cw = rw; ch = rh;
+
+    if (blit_full_countdown > 0) {
+        cx = 0; cy = 0; cw = (int)vid.width; ch = (int)vid.height;
+        blit_full_countdown--;
+    } else if (fb_pageflip_active && blit_prev_valid) {
+        /* union with the previous frame's rect -- see note above */
+        int x0 = cx < blit_prev_x ? cx : blit_prev_x;
+        int y0 = cy < blit_prev_y ? cy : blit_prev_y;
+        int x1 = (cx + cw) > (blit_prev_x + blit_prev_w)
+                 ? (cx + cw) : (blit_prev_x + blit_prev_w);
+        int y1 = (cy + ch) > (blit_prev_y + blit_prev_h)
+                 ? (cy + ch) : (blit_prev_y + blit_prev_h);
+        cx = x0; cy = y0; cw = x1 - x0; ch = y1 - y0;
+    } else if (fb_pageflip_active) {
+        cx = 0; cy = 0; cw = (int)vid.width; ch = (int)vid.height;
+    }
+
+    blit_prev_x = rx; blit_prev_y = ry;
+    blit_prev_w = rw; blit_prev_h = rh;
+    blit_prev_valid = 1;
+
+    r_prof_blit_rows += ch;
 
     if (fb_pageflip_active) {
         /* Always draw into the currently invisible page. */
@@ -409,25 +492,28 @@ void RepaintQtWindow(void)
 #endif
     }
 
-    if (vid.width * 2 == fb_width && vid.height * 2 == fb_height) {
+    if (blit_row && vid.width * 2 == fb_width && vid.height * 2 == fb_height) {
         /*
-         * Landscape fb: exact 2× pixel-doubling (e.g. 320×240 → 640×480).
-         * Pair of shorts written as a 32-bit store to halve uncached writes.
+         * Landscape fb: exact 2x pixel-doubling (e.g. 320x240 -> 640x480).
+         * One source pixel becomes one 32-bit word (two identical RGB565
+         * pixels), and each source row is emitted to two adjacent fb rows.
          */
-        int sw = vid.width, sh = vid.height;
         int y, x;
-        for (y = 0; y < sh; y++) {
-            const unsigned char *srow = src + y * rb;
-            unsigned int *drow0 =
-                (unsigned int *)(dst_base + (y * 2)     * fb_line_len);
-            unsigned int *drow1 =
-                (unsigned int *)(dst_base + (y * 2 + 1) * fb_line_len);
-            for (x = 0; x < sw; x++) {
+        int bytes = cw * (int)sizeof(unsigned int);
+
+        for (y = cy; y < cy + ch; y++) {
+            const unsigned char *srow = src + y * rb + cx;
+            unsigned char *d0 = dst_base + (y * 2)     * fb_line_len
+                                + cx * (int)sizeof(unsigned int);
+            unsigned char *d1 = d0 + fb_line_len;
+
+            for (x = 0; x < cw; x++) {
                 unsigned int cc = (unsigned int)palette16[srow[x]];
-                cc |= cc << 16;
-                drow0[x] = cc;
-                drow1[x] = cc;
+                blit_row[x] = cc | (cc << 16);
             }
+            /* cached -> uncached in bursts, twice (the doubled scanline) */
+            memcpy (d0, blit_row, bytes);
+            memcpy (d1, blit_row, bytes);
         }
     } else {
         /* Fallback: 1:1 blit, black borders if render < physical */
@@ -452,8 +538,11 @@ void RepaintQtWindow(void)
         }
     }
 
+    PROF_T1 (t_pix, PROF_BLIT_PIX);
+
     if (fb_pageflip_active) {
         struct fb_var_screeninfo pan;
+        PROF_T0 (t_pan);
 
         memset(&pan, 0, sizeof(pan));
         if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &pan) < 0) {
@@ -473,7 +562,13 @@ void RepaintQtWindow(void)
         /* The page we just made visible becomes off-screen again next
          * frame's write target's PAIR -- draw into the other page now. */
         fb_back_page = 1 - fb_back_page;
+        PROF_T1 (t_pan, PROF_BLIT_PAN);
     }
+}
+
+void RepaintQtWindow(void)
+{
+    RepaintQtWindowRect (0, 0, (int)vid.width, (int)vid.height);
 }
 
 void DoQtEventLoop(void)

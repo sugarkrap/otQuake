@@ -442,7 +442,14 @@ void D_DrawSpans8 (espan_t *pspan)
 								//  from causing overstepping & running off the
 								//  edge of the texture
 
+#ifdef USE_JR_OPT1
+				// reuse the iz reciprocal already fetched for snext above --
+				// the divide this replaces was the last one left in the
+				// per-8-pixel path, and costs nothing extra here
+				tnext = (((tdivz * iz) >> 8) & 0xFFFFFF00) + tadjust;
+#else
 				tnext = (((tdivz<<8)/zi)<<8) + tadjust;
+#endif
 				if (tnext > bbextentt)
 					tnext = bbextentt;
 				else if (tnext < 8)
@@ -463,7 +470,13 @@ void D_DrawSpans8 (espan_t *pspan)
 				zi += d_zistepu_fxp * spancountminus1;
 				if (!zi) zi = 1;
 				//z = zi;//(float)0x10000 / zi;	// prescale to 16.16 fixed-point
+#ifdef USE_JR_OPT1
+				// one table lookup replaces both divides in the span tail
+				iz = iztable[ ( zi >> 8 ) & 0xFFFF ];
+				snext = (((sdivz * iz) >> 8) & 0xFFFFFF00) + sadjust;
+#else
 				snext = (((sdivz<<8) / zi)<<8) + sadjust;
+#endif
 				if (snext > bbextents)
 					snext = bbextents;
 				else if (snext < 8)
@@ -471,7 +484,11 @@ void D_DrawSpans8 (espan_t *pspan)
 								//  from causing overstepping & running off the
 								//  edge of the texture
 
+#ifdef USE_JR_OPT1
+				tnext = (((tdivz * iz) >> 8) & 0xFFFFFF00) + tadjust;
+#else
 				tnext = (((tdivz<<8) / zi)<<8) + tadjust;
+#endif
 				if (tnext > bbextentt)
 					tnext = bbextentt;
 				else if (tnext < 8)
